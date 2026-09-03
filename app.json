@@ -1,0 +1,21 @@
+{
+  "expo": {
+    "name": "Wakeframe",
+    "slug": "wakeframe",
+    "version": "1.0.0",
+    "orientation": "portrait",
+    "userInterfaceStyle": "dark",
+    "scheme": "wakeframe",
+    "ios": {
+      "supportsTablet": true
+    },
+    "android": {
+      "adaptiveIcon": {
+        "backgroundColor": "#0f1320"
+      }
+    },
+    "plugins": [
+      "expo-status-bar"
+    ]
+  }
+}
