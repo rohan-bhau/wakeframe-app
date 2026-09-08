@@ -19,6 +19,7 @@ import type { Activity } from '../types';
 
 type ActivityInput = Pick<Activity, 'title' | 'startTime' | 'duration' | 'category'>;
 type ActivityDocument = Omit<Activity, 'id'>;
+type AddActivityMode = '24h' | 'custom';
 
 const days = ['Mon', 'Tue', 'Wed', 'Thu', 'Fri', 'Sat', 'Sun'] as const;
 
@@ -33,6 +34,7 @@ export function RoutineBuilderScreen({ uid }: { uid: string }) {
   const [form, setForm] = useState<ActivityInput>(emptyForm);
   const [activities, setActivities] = useState<Activity[]>([]);
   const [selectedDay, setSelectedDay] = useState(0);
+  const [mode, setMode] = useState<AddActivityMode>('24h');
   const [loading, setLoading] = useState(true);
   const [saving, setSaving] = useState(false);
   const [error, setError] = useState<string | null>(null);
@@ -117,58 +119,70 @@ export function RoutineBuilderScreen({ uid }: { uid: string }) {
         <Text style={styles.selectedDayLabel}>{days[selectedDay]} activities</Text>
 
         <View style={styles.form}>
-          <Field label="Title">
-            <TextInput
-              accessibilityLabel="Activity title"
-              onChangeText={(title) => setForm((current) => ({ ...current, title }))}
-              placeholder="Deep work"
-              placeholderTextColor={colors.outline}
-              style={styles.input}
-              value={form.title}
-            />
-          </Field>
-          <View style={styles.row}>
-            <View style={styles.half}>
-              <Field label="Start time">
-                <TextInput
-                  accessibilityLabel="Activity start time"
-                  keyboardType="numbers-and-punctuation"
-                  maxLength={5}
-                  onChangeText={(startTime) => setForm((current) => ({ ...current, startTime }))}
-                  placeholder="09:00"
-                  placeholderTextColor={colors.outline}
-                  style={styles.input}
-                  value={form.startTime}
-                />
-              </Field>
-            </View>
-            <View style={styles.half}>
-              <Field label="Duration (minutes)">
-                <TextInput
-                  accessibilityLabel="Activity duration"
-                  keyboardType="number-pad"
-                  onChangeText={(value) => setForm((current) => ({ ...current, duration: value ? Number(value) : undefined }))}
-                  placeholder="60"
-                  placeholderTextColor={colors.outline}
-                  style={styles.input}
-                  value={form.duration === undefined ? '' : String(form.duration)}
-                />
-              </Field>
-            </View>
+          <Text style={styles.formTitle}>Add activity</Text>
+          <View accessibilityRole="radiogroup" style={styles.modeToggle}>
+            <ModeOption label="24-Hour Mode" mode="24h" selectedMode={mode} onPress={setMode} />
+            <ModeOption label="Custom Mode" mode="custom" selectedMode={mode} onPress={setMode} />
           </View>
-          <Field label="Category">
-            <TextInput
-              accessibilityLabel="Activity category"
-              onChangeText={(category) => setForm((current) => ({ ...current, category }))}
-              placeholder="Work"
-              placeholderTextColor={colors.outline}
-              style={styles.input}
-              value={form.category}
-            />
-          </Field>
-          <Pressable accessibilityRole="button" disabled={saving} onPress={saveActivity} style={styles.button}>
-            {saving ? <ActivityIndicator color={colors.background} /> : <Text style={styles.buttonText}>Save activity</Text>}
-          </Pressable>
+
+          {mode === 'custom' ? (
+            <Text style={styles.modePlaceholder}>Custom mode coming in Phase 2</Text>
+          ) : (
+            <>
+              <Field label="Title">
+                <TextInput
+                  accessibilityLabel="Activity title"
+                  onChangeText={(title) => setForm((current) => ({ ...current, title }))}
+                  placeholder="Deep work"
+                  placeholderTextColor={colors.outline}
+                  style={styles.input}
+                  value={form.title}
+                />
+              </Field>
+              <View style={styles.row}>
+                <View style={styles.half}>
+                  <Field label="Start time">
+                    <TextInput
+                      accessibilityLabel="Activity start time"
+                      keyboardType="numbers-and-punctuation"
+                      maxLength={5}
+                      onChangeText={(startTime) => setForm((current) => ({ ...current, startTime }))}
+                      placeholder="09:00"
+                      placeholderTextColor={colors.outline}
+                      style={styles.input}
+                      value={form.startTime}
+                    />
+                  </Field>
+                </View>
+                <View style={styles.half}>
+                  <Field label="Duration (minutes)">
+                    <TextInput
+                      accessibilityLabel="Activity duration"
+                      keyboardType="number-pad"
+                      onChangeText={(value) => setForm((current) => ({ ...current, duration: value ? Number(value) : undefined }))}
+                      placeholder="60"
+                      placeholderTextColor={colors.outline}
+                      style={styles.input}
+                      value={form.duration === undefined ? '' : String(form.duration)}
+                    />
+                  </Field>
+                </View>
+              </View>
+              <Field label="Category">
+                <TextInput
+                  accessibilityLabel="Activity category"
+                  onChangeText={(category) => setForm((current) => ({ ...current, category }))}
+                  placeholder="Work"
+                  placeholderTextColor={colors.outline}
+                  style={styles.input}
+                  value={form.category}
+                />
+              </Field>
+              <Pressable accessibilityRole="button" disabled={saving} onPress={saveActivity} style={styles.button}>
+                {saving ? <ActivityIndicator color={colors.background} /> : <Text style={styles.buttonText}>Save activity</Text>}
+              </Pressable>
+            </>
+          )}
         </View>
 
         <View style={styles.listHeader}>
@@ -204,6 +218,32 @@ function Field({ label, children }: { label: string; children: ReactNode }) {
   );
 }
 
+function ModeOption({
+  label,
+  mode,
+  selectedMode,
+  onPress,
+}: {
+  label: string;
+  mode: AddActivityMode;
+  selectedMode: AddActivityMode;
+  onPress: (mode: AddActivityMode) => void;
+}) {
+  const selected = mode === selectedMode;
+
+  return (
+    <Pressable
+      accessibilityLabel={label}
+      accessibilityRole="radio"
+      accessibilityState={{ selected }}
+      onPress={() => onPress(mode)}
+      style={[styles.modeOption, selected && styles.selectedModeOption]}
+    >
+      <Text style={[styles.modeOptionText, selected && styles.selectedModeOptionText]}>{label}</Text>
+    </Pressable>
+  );
+}
+
 const styles = StyleSheet.create({
   screen: { flex: 1, backgroundColor: colors.background },
   content: { padding: 20, paddingTop: 32, paddingBottom: 40 },
@@ -217,6 +257,13 @@ const styles = StyleSheet.create({
   selectedDayTabText: { color: colors.background },
   selectedDayLabel: { color: colors.tertiary, fontSize: 13, fontWeight: '600', letterSpacing: 0.5, marginBottom: 12, marginTop: 8 },
   form: { backgroundColor: colors.surfaceContainer, borderColor: colors.outlineVariant, borderWidth: 1, padding: 16 },
+  formTitle: { color: colors.onSurface, fontSize: 20, fontWeight: '500', marginBottom: 14 },
+  modeToggle: { flexDirection: 'row', marginBottom: 20 },
+  modeOption: { alignItems: 'center', borderColor: colors.outlineVariant, borderWidth: 1, flex: 1, justifyContent: 'center', minHeight: 44, paddingHorizontal: 8 },
+  selectedModeOption: { backgroundColor: colors.tertiary, borderColor: colors.tertiary },
+  modeOptionText: { color: colors.onSurfaceVariant, fontSize: 13, fontWeight: '600', textAlign: 'center' },
+  selectedModeOptionText: { color: colors.background },
+  modePlaceholder: { color: colors.onSurfaceVariant, fontSize: 15, lineHeight: 22, paddingBottom: 8, paddingTop: 8, textAlign: 'center' },
   field: { marginBottom: 16 },
   label: { color: colors.onSurfaceVariant, fontSize: 12, marginBottom: 6 },
   input: { borderBottomColor: colors.outlineVariant, borderBottomWidth: 1, color: colors.onSurface, fontSize: 16, minHeight: 44, paddingVertical: 8 },
