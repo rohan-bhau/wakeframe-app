@@ -1,4 +1,4 @@
-import { addDoc, collection, onSnapshot, orderBy, query } from 'firebase/firestore';
+import { addDoc, collection, doc, onSnapshot, orderBy, query, writeBatch } from 'firebase/firestore';
 import { useEffect, useState, type ReactNode } from 'react';
 import {
   ActivityIndicator,
@@ -34,9 +34,11 @@ export function RoutineBuilderScreen({ uid }: { uid: string }) {
   const [form, setForm] = useState<ActivityInput>(emptyForm);
   const [activities, setActivities] = useState<Activity[]>([]);
   const [selectedDay, setSelectedDay] = useState(0);
+  const [copyDays, setCopyDays] = useState<number[]>([]);
   const [mode, setMode] = useState<AddActivityMode>('24h');
   const [loading, setLoading] = useState(true);
   const [saving, setSaving] = useState(false);
+  const [copying, setCopying] = useState(false);
   const [error, setError] = useState<string | null>(null);
 
   useEffect(() => {
@@ -55,13 +57,67 @@ export function RoutineBuilderScreen({ uid }: { uid: string }) {
     );
   }, [uid]);
 
-  const selectedActivities = activities.filter(
-    (activity) => activity.weekday === selectedDay || (activity.weekday === undefined && selectedDay === 0),
+  const activitiesForDay = (day: number) => activities.filter(
+    (activity) => activity.weekday === day || (activity.weekday === undefined && day === 0),
   );
+  const selectedActivities = activitiesForDay(selectedDay);
 
   const selectDay = (day: number) => {
     setSelectedDay(day);
     setForm(emptyForm);
+    setCopyDays([]);
+  };
+
+  const toggleCopyDay = (day: number) => {
+    if (day === selectedDay) return;
+    setCopyDays((current) => (current.includes(day) ? current.filter((value) => value !== day) : [...current, day]));
+  };
+
+  const copyToDays = (targetDays: number[]) => {
+    const uniqueTargetDays = [...new Set(targetDays)].filter((day) => day !== selectedDay);
+    if (selectedActivities.length === 0 || uniqueTargetDays.length === 0) return;
+
+    const conflictingDays = uniqueTargetDays.filter((day) => activitiesForDay(day).length > 0);
+    if (conflictingDays.length > 0) {
+      Alert.alert(
+        'Activities already exist',
+        `${conflictingDays.map((day) => days[day]).join(', ')} already ${conflictingDays.length === 1 ? 'has' : 'have'} activities. How should they be handled?`,
+        [
+          { text: 'Cancel', style: 'cancel' },
+          { text: 'Merge', onPress: () => void executeCopy(uniqueTargetDays, 'merge') },
+          { text: 'Replace', style: 'destructive', onPress: () => void executeCopy(uniqueTargetDays, 'replace') },
+        ],
+      );
+      return;
+    }
+
+    void executeCopy(uniqueTargetDays, 'merge');
+  };
+
+  const executeCopy = async (targetDays: number[], strategy: 'merge' | 'replace') => {
+    setCopying(true);
+    try {
+      const activityCollection = collection(db, 'users', uid, 'activities');
+      const batch = writeBatch(db);
+      const sourceActivities = selectedActivities.map(({ id: _id, ...activity }) => activity);
+
+      for (const day of targetDays) {
+        if (strategy === 'replace') {
+          activitiesForDay(day).forEach((activity) => batch.delete(doc(activityCollection, activity.id)));
+        }
+        sourceActivities.forEach((activity, index) => {
+          batch.set(doc(activityCollection), { ...activity, weekday: day, sortOrder: index });
+        });
+      }
+
+      await batch.commit();
+      setCopyDays([]);
+      Alert.alert('Routine copied', `Copied ${selectedActivities.length} ${selectedActivities.length === 1 ? 'activity' : 'activities'} to ${targetDays.map((day) => days[day]).join(', ')}.`);
+    } catch {
+      Alert.alert('Could not copy routine', 'Please check your connection and try again.');
+    } finally {
+      setCopying(false);
+    }
   };
 
   const saveActivity = async () => {
@@ -204,6 +260,44 @@ export function RoutineBuilderScreen({ uid }: { uid: string }) {
             </View>
           </View>
         ))}
+        {!loading && !error && selectedActivities.length > 0 ? (
+          <View style={styles.copyPanel}>
+            <Text style={styles.copyTitle}>Copy to other days</Text>
+            <Text style={styles.copyDescription}>Duplicate this day&apos;s full activity list.</Text>
+            <View style={styles.copyDayRow}>
+              {days.map((day, index) => {
+                const isCurrentDay = index === selectedDay;
+                const isCopyDay = copyDays.includes(index);
+                return (
+                  <Pressable
+                    accessibilityLabel={`${day} copy target`}
+                    accessibilityRole="checkbox"
+                    accessibilityState={{ disabled: isCurrentDay, selected: isCopyDay }}
+                    disabled={isCurrentDay || copying}
+                    key={day}
+                    onPress={() => toggleCopyDay(index)}
+                    style={[styles.copyDay, isCopyDay && styles.selectedCopyDay, isCurrentDay && styles.currentCopyDay]}
+                  >
+                    <Text style={[styles.copyDayText, isCopyDay && styles.selectedCopyDayText, isCurrentDay && styles.currentCopyDayText]}>{day}</Text>
+                  </Pressable>
+                );
+              })}
+            </View>
+            <View style={styles.copyActions}>
+              <Pressable
+                accessibilityRole="button"
+                disabled={copying || copyDays.length === 0}
+                onPress={() => copyToDays(copyDays)}
+                style={[styles.copyButton, (copying || copyDays.length === 0) && styles.disabledCopyButton]}
+              >
+                {copying ? <ActivityIndicator color={colors.background} /> : <Text style={styles.copyButtonText}>Copy selected</Text>}
+              </Pressable>
+              <Pressable accessibilityRole="button" disabled={copying} onPress={() => copyToDays(days.map((_, index) => index))} style={styles.allDaysButton}>
+                <Text style={styles.allDaysButtonText}>All 7 days</Text>
+              </Pressable>
+            </View>
+          </View>
+        ) : null}
       </ScrollView>
     </KeyboardAvoidingView>
   );
@@ -264,6 +358,22 @@ const styles = StyleSheet.create({
   modeOptionText: { color: colors.onSurfaceVariant, fontSize: 13, fontWeight: '600', textAlign: 'center' },
   selectedModeOptionText: { color: colors.background },
   modePlaceholder: { color: colors.onSurfaceVariant, fontSize: 15, lineHeight: 22, paddingBottom: 8, paddingTop: 8, textAlign: 'center' },
+  copyPanel: { borderColor: colors.outlineVariant, borderTopWidth: 1, marginTop: 28, paddingTop: 20 },
+  copyTitle: { color: colors.onSurface, fontSize: 20, fontWeight: '500', marginBottom: 6 },
+  copyDescription: { color: colors.onSurfaceVariant, fontSize: 14, marginBottom: 14 },
+  copyDayRow: { flexDirection: 'row', gap: 6 },
+  copyDay: { alignItems: 'center', borderColor: colors.outlineVariant, borderWidth: 1, flex: 1, justifyContent: 'center', minHeight: 38 },
+  selectedCopyDay: { backgroundColor: colors.progressTeal, borderColor: colors.progressTeal },
+  currentCopyDay: { backgroundColor: colors.surfaceContainerHigh },
+  copyDayText: { color: colors.onSurfaceVariant, fontSize: 12, fontWeight: '600' },
+  selectedCopyDayText: { color: colors.background },
+  currentCopyDayText: { color: colors.outline },
+  copyActions: { flexDirection: 'row', gap: 8, marginTop: 12 },
+  copyButton: { alignItems: 'center', backgroundColor: colors.tertiary, flex: 1, justifyContent: 'center', minHeight: 44, paddingHorizontal: 10 },
+  disabledCopyButton: { opacity: 0.45 },
+  copyButtonText: { color: colors.background, fontSize: 13, fontWeight: '600' },
+  allDaysButton: { alignItems: 'center', borderColor: colors.tertiary, borderWidth: 1, flex: 1, justifyContent: 'center', minHeight: 44, paddingHorizontal: 10 },
+  allDaysButtonText: { color: colors.tertiary, fontSize: 13, fontWeight: '600' },
   field: { marginBottom: 16 },
   label: { color: colors.onSurfaceVariant, fontSize: 12, marginBottom: 6 },
   input: { borderBottomColor: colors.outlineVariant, borderBottomWidth: 1, color: colors.onSurface, fontSize: 16, minHeight: 44, paddingVertical: 8 },
