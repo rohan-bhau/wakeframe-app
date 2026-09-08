@@ -37,6 +37,7 @@ export interface DayCycle {
 
 export interface Activity {
   id: string;
+  weekday?: number;
   dayPlanId?: string;
   dayCycleId?: string;
   title: string;

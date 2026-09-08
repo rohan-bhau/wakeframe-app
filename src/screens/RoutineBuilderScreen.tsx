@@ -20,6 +20,8 @@ import type { Activity } from '../types';
 type ActivityInput = Pick<Activity, 'title' | 'startTime' | 'duration' | 'category'>;
 type ActivityDocument = Omit<Activity, 'id'>;
 
+const days = ['Mon', 'Tue', 'Wed', 'Thu', 'Fri', 'Sat', 'Sun'] as const;
+
 const emptyForm: ActivityInput = {
   title: '',
   startTime: '',
@@ -30,6 +32,7 @@ const emptyForm: ActivityInput = {
 export function RoutineBuilderScreen({ uid }: { uid: string }) {
   const [form, setForm] = useState<ActivityInput>(emptyForm);
   const [activities, setActivities] = useState<Activity[]>([]);
+  const [selectedDay, setSelectedDay] = useState(0);
   const [loading, setLoading] = useState(true);
   const [saving, setSaving] = useState(false);
   const [error, setError] = useState<string | null>(null);
@@ -50,6 +53,15 @@ export function RoutineBuilderScreen({ uid }: { uid: string }) {
     );
   }, [uid]);
 
+  const selectedActivities = activities.filter(
+    (activity) => activity.weekday === selectedDay || (activity.weekday === undefined && selectedDay === 0),
+  );
+
+  const selectDay = (day: number) => {
+    setSelectedDay(day);
+    setForm(emptyForm);
+  };
+
   const saveActivity = async () => {
     const title = form.title.trim();
     const category = form.category.trim();
@@ -63,13 +75,14 @@ export function RoutineBuilderScreen({ uid }: { uid: string }) {
     setSaving(true);
     try {
       const activity: ActivityDocument = {
+        weekday: selectedDay,
         title,
         startTime: form.startTime,
         duration,
         category,
         maxBreakMinutes: 0,
         isExtended: false,
-        sortOrder: activities.length,
+        sortOrder: selectedActivities.length,
       };
       await addDoc(collection(db, 'users', uid, 'activities'), activity);
       setForm(emptyForm);
@@ -85,7 +98,23 @@ export function RoutineBuilderScreen({ uid }: { uid: string }) {
       <ScrollView contentContainerStyle={styles.content} keyboardShouldPersistTaps="handled">
         <Text style={styles.eyebrow}>Wakeframe</Text>
         <Text style={styles.title}>Routine Builder</Text>
-        <Text style={styles.description}>Add an activity to your routine and keep the list synced.</Text>
+        <Text style={styles.description}>Build each day of your week, then keep your routine synced.</Text>
+
+        <ScrollView contentContainerStyle={styles.dayTabs} horizontal showsHorizontalScrollIndicator={false}>
+          {days.map((day, index) => (
+            <Pressable
+              accessibilityLabel={`${day} routine`}
+              accessibilityRole="tab"
+              accessibilityState={{ selected: selectedDay === index }}
+              key={day}
+              onPress={() => selectDay(index)}
+              style={[styles.dayTab, selectedDay === index && styles.selectedDayTab]}
+            >
+              <Text style={[styles.dayTabText, selectedDay === index && styles.selectedDayTabText]}>{day}</Text>
+            </Pressable>
+          ))}
+        </ScrollView>
+        <Text style={styles.selectedDayLabel}>{days[selectedDay]} activities</Text>
 
         <View style={styles.form}>
           <Field label="Title">
@@ -144,12 +173,12 @@ export function RoutineBuilderScreen({ uid }: { uid: string }) {
 
         <View style={styles.listHeader}>
           <Text style={styles.sectionTitle}>Saved activities</Text>
-          <Text style={styles.count}>{activities.length}</Text>
+          <Text style={styles.count}>{selectedActivities.length}</Text>
         </View>
         {loading ? <ActivityIndicator color={colors.tertiary} style={styles.loader} /> : null}
         {error ? <Text style={styles.error}>{error}</Text> : null}
-        {!loading && !error && activities.length === 0 ? <Text style={styles.empty}>No activities saved yet.</Text> : null}
-        {activities.map((activity) => (
+        {!loading && !error && selectedActivities.length === 0 ? <Text style={styles.empty}>No activities saved for {days[selectedDay]} yet.</Text> : null}
+        {selectedActivities.map((activity) => (
           <View key={activity.id} style={styles.activity}>
             <View style={styles.activityTime}>
               <Text style={styles.time}>{activity.startTime}</Text>
@@ -181,6 +210,12 @@ const styles = StyleSheet.create({
   eyebrow: { color: colors.tertiary, fontSize: 12, letterSpacing: 1, marginBottom: 12 },
   title: { color: colors.onSurface, fontSize: 32, fontWeight: '500', marginBottom: 12 },
   description: { color: colors.onSurfaceVariant, fontSize: 16, lineHeight: 24, marginBottom: 24 },
+  dayTabs: { gap: 8, paddingBottom: 8 },
+  dayTab: { alignItems: 'center', borderColor: colors.outlineVariant, borderWidth: 1, justifyContent: 'center', minWidth: 48, minHeight: 42, paddingHorizontal: 10 },
+  selectedDayTab: { backgroundColor: colors.tertiary, borderColor: colors.tertiary },
+  dayTabText: { color: colors.onSurfaceVariant, fontSize: 13, fontWeight: '600' },
+  selectedDayTabText: { color: colors.background },
+  selectedDayLabel: { color: colors.tertiary, fontSize: 13, fontWeight: '600', letterSpacing: 0.5, marginBottom: 12, marginTop: 8 },
   form: { backgroundColor: colors.surfaceContainer, borderColor: colors.outlineVariant, borderWidth: 1, padding: 16 },
   field: { marginBottom: 16 },
   label: { color: colors.onSurfaceVariant, fontSize: 12, marginBottom: 6 },
