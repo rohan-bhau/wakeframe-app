@@ -1,5 +1,6 @@
 import { NavigationContainer, DarkTheme } from '@react-navigation/native';
 import { createBottomTabNavigator } from '@react-navigation/bottom-tabs';
+import AsyncStorage from '@react-native-async-storage/async-storage';
 import { StatusBar } from 'expo-status-bar';
 import {
   addNotificationResponseReceivedListener,
@@ -31,6 +32,7 @@ export type RootTabParamList = {
 
 const Tab = createBottomTabNavigator<RootTabParamList>();
 const quickBreakDurations = [5, 10, 15, 30];
+const handledResponseKey = 'wakeframe.handled-notification-response';
 
 const navigationTheme = {
   ...DarkTheme,
@@ -67,6 +69,9 @@ export default function App() {
     if (!uid) return;
 
     const processResponse = (response: NotificationResponse) => {
+      const responseKey = `${response.notification.request.identifier}:${response.actionIdentifier}`;
+      if (handledResponseIds.has(responseKey)) return;
+      handledResponseIds.add(responseKey);
       void dismissNotificationAsync(response.notification.request.identifier).catch(() => undefined);
 
       if (response.actionIdentifier === DEFAULT_ACTION_IDENTIFIER) {
@@ -86,13 +91,13 @@ export default function App() {
       processResponse(response);
     });
 
-    const lastResponse = getLastNotificationResponse();
-    if (lastResponse) {
-      clearLastNotificationResponse();
-      processResponse(lastResponse);
-    }
+    let active = true;
+    void consumeLastResponse(processResponse, () => { if (active) clearLastNotificationResponse(); });
 
-    return () => subscription.remove();
+    return () => {
+      active = false;
+      subscription.remove();
+    };
   }, [uid]);
 
   if (authLoading) {
@@ -145,8 +150,9 @@ export default function App() {
 
           const maxBreakMinutes = Number((breakResponse.notification.request.content.data as { maxBreakMinutes?: string } | undefined)?.maxBreakMinutes);
           const actualDuration = maxBreakMinutes > 0 ? Math.min(requestedDuration, maxBreakMinutes) : requestedDuration;
-          void handleNotificationResponse(uid, breakResponse, actualDuration)
-            .then(() => setBreakResponse(null))
+          const responseToHandle = breakResponse;
+          setBreakResponse(null);
+          void handleNotificationResponse(uid, responseToHandle, actualDuration)
             .catch(() => Alert.alert('Could not start break', 'Please try again.'));
         }}
         requestedDuration={Number(breakDuration)}
@@ -154,6 +160,31 @@ export default function App() {
       />
     </>
   );
+}
+
+const handledResponseIds = new Set<string>();
+
+async function consumeLastResponse(
+  processResponse: (response: NotificationResponse) => void,
+  clearResponse: () => void,
+) {
+  let lastResponse: NotificationResponse | null = null;
+  try {
+    lastResponse = getLastNotificationResponse();
+  } catch {
+    return;
+  }
+  if (!lastResponse) return;
+
+  const responseKey = `${lastResponse.notification.request.identifier}:${lastResponse.actionIdentifier}`;
+  if (await AsyncStorage.getItem(`${handledResponseKey}:${responseKey}`)) {
+    clearResponse();
+    return;
+  }
+
+  await AsyncStorage.setItem(`${handledResponseKey}:${responseKey}`, '1');
+  clearResponse();
+  processResponse(lastResponse);
 }
 
 function showNotificationActions(
