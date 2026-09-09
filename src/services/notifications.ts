@@ -1,5 +1,6 @@
 import * as Notifications from 'expo-notifications';
-import { doc, setDoc } from 'firebase/firestore';
+import * as TaskManager from 'expo-task-manager';
+import { collection, doc, getDoc, setDoc } from 'firebase/firestore';
 import { Platform } from 'react-native';
 
 import { db } from '../config/firebase';
@@ -7,13 +8,25 @@ import type { Activity } from '../types';
 
 export const ACTIVITY_NOTIFICATION_CATEGORY = 'activity-start';
 export const CHECK_IN_NOTIFICATION_CATEGORY = 'activity-check-in';
+export const BREAK_OVER_NOTIFICATION_CATEGORY = 'break-over';
+const BREAK_CAP_TASK = 'wakeframe-break-cap';
+const DEFAULT_BREAK_MINUTES = 15;
 export const ACTIVITY_ACTIONS = {
   accept: 'accept-activity',
   ignore: 'ignore-activity',
   break: 'break-activity',
   yes: 'complete-activity',
   notYet: 'continue-activity',
+  resume: 'resume-activity',
 } as const;
+
+type BreakNotificationData = {
+  activityId: string;
+  date: string;
+  uid: string;
+  breakLogId: string;
+  phase: 'break-over' | 'break-cap';
+};
 
 Notifications.setNotificationHandler({
   handleNotification: async () => ({
@@ -56,9 +69,12 @@ export async function configureActivityNotifications() {
     { identifier: ACTIVITY_ACTIONS.ignore, buttonTitle: 'Ignore', options: { opensAppToForeground: false } },
     { identifier: ACTIVITY_ACTIONS.break, buttonTitle: 'Add Break', options: { opensAppToForeground: false } },
   ]);
+  await Notifications.setNotificationCategoryAsync(BREAK_OVER_NOTIFICATION_CATEGORY, [
+    { identifier: ACTIVITY_ACTIONS.resume, buttonTitle: 'Resume', options: { opensAppToForeground: false } },
+  ]);
 }
 
-export async function scheduleTodayActivityNotifications(activities: Activity[]) {
+export async function scheduleTodayActivityNotifications(uid: string, activities: Activity[]) {
   if (Platform.OS === 'web') return;
   if (!(await requestNotificationPermissions())) return;
 
@@ -78,7 +94,7 @@ export async function scheduleTodayActivityNotifications(activities: Activity[])
         title: 'Time to start',
         body: activity.title,
         categoryIdentifier: ACTIVITY_NOTIFICATION_CATEGORY,
-        data: { activityId: activity.id, date: getDateKey(now), phase: 'start' },
+        data: { activityId: activity.id, date: getDateKey(now), uid, phase: 'start' },
         date: startDate,
       });
     }
@@ -89,7 +105,7 @@ export async function scheduleTodayActivityNotifications(activities: Activity[])
         title: `Check in: ${activity.title}`,
         body: `Did you finish ${activity.title}? Ready for next?`,
         categoryIdentifier: CHECK_IN_NOTIFICATION_CATEGORY,
-        data: { activityId: activity.id, date: getDateKey(now), phase: 'check-in' },
+        data: { activityId: activity.id, date: getDateKey(now), uid, phase: 'check-in' },
         date: endDate,
       });
     }
@@ -99,8 +115,17 @@ export async function scheduleTodayActivityNotifications(activities: Activity[])
 export async function handleNotificationResponse(uid: string, response: Notifications.NotificationResponse) {
   if (Platform.OS === 'web' || response.actionIdentifier === Notifications.DEFAULT_ACTION_IDENTIFIER) return;
 
-  const data = (response.notification.request.content.data ?? {}) as { activityId?: unknown; date?: unknown };
+  const data = (response.notification.request.content.data ?? {}) as { activityId?: unknown; date?: unknown; breakLogId?: unknown };
   if (typeof data.activityId !== 'string' || typeof data.date !== 'string') return;
+
+  if (response.actionIdentifier === ACTIVITY_ACTIONS.break) {
+    await startBreak(uid, data.activityId, data.date);
+    return;
+  }
+  if (response.actionIdentifier === ACTIVITY_ACTIONS.resume && typeof data.breakLogId === 'string') {
+    await finishBreak(uid, data.activityId, data.date, data.breakLogId, false);
+    return;
+  }
 
   const stateByAction: Record<string, { state: string; timestampField?: string }> = {
     [ACTIVITY_ACTIONS.accept]: { state: 'in_progress', timestampField: 'startedAt' },
@@ -119,6 +144,79 @@ export async function handleNotificationResponse(uid: string, response: Notifica
     ...(transition.timestampField ? { [transition.timestampField]: new Date().toISOString() } : {}),
   };
   await setDoc(doc(db, 'users', uid, 'activityInstances', `${data.activityId}_${data.date}`), instance, { merge: true });
+}
+
+export async function startBreak(uid: string, activityId: string, date: string, customDurationMinutes?: number) {
+  const [activitySnapshot, userSnapshot] = await Promise.all([
+    getDoc(doc(db, 'users', uid, 'activities', activityId)),
+    getDoc(doc(db, 'users', uid)),
+  ]);
+  if (!activitySnapshot.exists()) return;
+
+  const activity = { id: activitySnapshot.id, ...activitySnapshot.data() } as Activity;
+  const userData = userSnapshot.exists() ? userSnapshot.data() : undefined;
+  const defaultDuration = Number(userData?.defaultBreakDuration);
+  const requestedDuration = Number.isFinite(customDurationMinutes) && (customDurationMinutes ?? 0) > 0
+    ? customDurationMinutes ?? DEFAULT_BREAK_MINUTES
+    : Number.isFinite(defaultDuration) && defaultDuration > 0 ? defaultDuration : DEFAULT_BREAK_MINUTES;
+  const maxBreakMinutes = Number(activity.maxBreakMinutes);
+  const plannedDuration = maxBreakMinutes > 0 ? Math.min(requestedDuration, maxBreakMinutes) : requestedDuration;
+  const startedAt = new Date();
+  const breakEndsAt = new Date(startedAt.getTime() + plannedDuration * 60_000);
+  const breakLogId = `${activityId}_${date}_${startedAt.getTime()}`;
+  const instanceId = `${activityId}_${date}`;
+
+  await Promise.all([
+    setDoc(doc(db, 'users', uid, 'activityInstances', instanceId), {
+      activityId,
+      date,
+      state: 'break',
+      currentBreakId: breakLogId,
+      breakStartedAt: startedAt.toISOString(),
+      breakEndsAt: breakEndsAt.toISOString(),
+    }, { merge: true }),
+    setDoc(doc(db, 'users', uid, 'breakLogs', breakLogId), {
+      activityInstanceId: instanceId,
+      activityId,
+      date,
+      startAt: startedAt.toISOString(),
+      plannedDuration,
+      exceededCap: false,
+      exceeded_cap: false,
+    }),
+    scheduleNotification({
+      title: "Break's over",
+      body: `Break's over, resume ${activity.title}?`,
+      categoryIdentifier: BREAK_OVER_NOTIFICATION_CATEGORY,
+      data: { activityId, date, uid, breakLogId, phase: 'break-over' },
+      date: breakEndsAt,
+    }),
+    maxBreakMinutes > plannedDuration
+      ? scheduleNotification({
+          title: 'Break limit reached',
+          body: `Break limit reached. Resuming ${activity.title}.`,
+          categoryIdentifier: BREAK_OVER_NOTIFICATION_CATEGORY,
+          data: { activityId, date, uid, breakLogId, phase: 'break-cap' },
+          date: new Date(startedAt.getTime() + maxBreakMinutes * 60_000),
+        })
+      : Promise.resolve(),
+  ]);
+}
+
+async function finishBreak(uid: string, activityId: string, date: string, breakLogId: string, exceededCap: boolean) {
+  const endedAt = new Date().toISOString();
+  await Promise.all([
+    setDoc(doc(db, 'users', uid, 'activityInstances', `${activityId}_${date}`), {
+      state: 'in_progress',
+      currentBreakId: null,
+      breakEndedAt: endedAt,
+    }, { merge: true }),
+    setDoc(doc(db, 'users', uid, 'breakLogs', breakLogId), {
+      endAt: endedAt,
+      exceededCap,
+      exceeded_cap: exceededCap,
+    }, { merge: true }),
+  ]);
 }
 
 async function scheduleNotification({
@@ -168,4 +266,21 @@ function getEndDate(date: Date, activity: Activity, startDate: Date | null) {
   }
 
   return null;
+}
+
+TaskManager.defineTask<Notifications.NotificationTaskPayload>(BREAK_CAP_TASK, async ({ data }) => {
+  if ('actionIdentifier' in data) return Notifications.BackgroundNotificationTaskResult.NoData;
+
+  const payload = data.data?.dataString ? JSON.parse(data.data.dataString) : data.data;
+  const breakData = payload as Partial<BreakNotificationData>;
+  if (breakData.phase !== 'break-cap' || !breakData.uid || !breakData.activityId || !breakData.date || !breakData.breakLogId) {
+    return Notifications.BackgroundNotificationTaskResult.NoData;
+  }
+
+  await finishBreak(breakData.uid, breakData.activityId, breakData.date, breakData.breakLogId, true);
+  return Notifications.BackgroundNotificationTaskResult.NewData;
+});
+
+if (Platform.OS !== 'web') {
+  void Notifications.registerTaskAsync(BREAK_CAP_TASK).catch(() => undefined);
 }
