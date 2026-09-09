@@ -69,18 +69,18 @@ export async function configureActivityNotifications() {
   }
 
   await setNotificationCategoryAsync(ACTIVITY_NOTIFICATION_CATEGORY, [
-    { identifier: ACTIVITY_ACTIONS.accept, buttonTitle: 'Accept', options: { opensAppToForeground: false } },
-    { identifier: ACTIVITY_ACTIONS.ignore, buttonTitle: 'Ignore', options: { opensAppToForeground: false } },
-    { identifier: ACTIVITY_ACTIONS.break, buttonTitle: 'Break', options: { opensAppToForeground: false } },
+    { identifier: ACTIVITY_ACTIONS.accept, buttonTitle: 'Accept', options: { opensAppToForeground: true } },
+    { identifier: ACTIVITY_ACTIONS.ignore, buttonTitle: 'Ignore', options: { opensAppToForeground: true } },
+    { identifier: ACTIVITY_ACTIONS.break, buttonTitle: 'Break', options: { opensAppToForeground: true } },
   ]);
   await setNotificationCategoryAsync(CHECK_IN_NOTIFICATION_CATEGORY, [
-    { identifier: ACTIVITY_ACTIONS.yes, buttonTitle: 'Yes', options: { opensAppToForeground: false } },
-    { identifier: ACTIVITY_ACTIONS.notYet, buttonTitle: 'Not yet', options: { opensAppToForeground: false } },
-    { identifier: ACTIVITY_ACTIONS.ignore, buttonTitle: 'Ignore', options: { opensAppToForeground: false } },
-    { identifier: ACTIVITY_ACTIONS.break, buttonTitle: 'Add Break', options: { opensAppToForeground: false } },
+    { identifier: ACTIVITY_ACTIONS.yes, buttonTitle: 'Yes', options: { opensAppToForeground: true } },
+    { identifier: ACTIVITY_ACTIONS.notYet, buttonTitle: 'Not yet', options: { opensAppToForeground: true } },
+    { identifier: ACTIVITY_ACTIONS.ignore, buttonTitle: 'Ignore', options: { opensAppToForeground: true } },
+    { identifier: ACTIVITY_ACTIONS.break, buttonTitle: 'Add Break', options: { opensAppToForeground: true } },
   ]);
   await setNotificationCategoryAsync(BREAK_OVER_NOTIFICATION_CATEGORY, [
-    { identifier: ACTIVITY_ACTIONS.resume, buttonTitle: 'Resume', options: { opensAppToForeground: false } },
+    { identifier: ACTIVITY_ACTIONS.resume, buttonTitle: 'Resume', options: { opensAppToForeground: true } },
   ]);
 }
 

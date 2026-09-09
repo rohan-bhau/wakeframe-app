@@ -1,10 +1,16 @@
 import { NavigationContainer, DarkTheme } from '@react-navigation/native';
 import { createBottomTabNavigator } from '@react-navigation/bottom-tabs';
 import { StatusBar } from 'expo-status-bar';
-import { addNotificationResponseReceivedListener } from 'expo-notifications/build/NotificationsEmitter';
+import {
+  addNotificationResponseReceivedListener,
+  clearLastNotificationResponse,
+  DEFAULT_ACTION_IDENTIFIER,
+  getLastNotificationResponse,
+} from 'expo-notifications/build/NotificationsEmitter';
+import type { NotificationResponse } from 'expo-notifications/build/Notifications.types';
 import { onAuthStateChanged, signOut } from 'firebase/auth';
 import { useEffect, useState } from 'react';
-import { ActivityIndicator, StyleSheet, View } from 'react-native';
+import { ActivityIndicator, Alert, StyleSheet, View } from 'react-native';
 
 import { auth } from './src/config/firebase';
 import { AnalyticsScreen } from './src/screens/AnalyticsScreen';
@@ -12,7 +18,7 @@ import { AuthScreen } from './src/screens/AuthScreen';
 import { RoutineBuilderScreen } from './src/screens/RoutineBuilderScreen';
 import { SettingsScreen } from './src/screens/SettingsScreen';
 import { TodayScreen } from './src/screens/TodayScreen';
-import { configureActivityNotifications, handleNotificationResponse, requestNotificationPermissions } from './src/services/notifications';
+import { ACTIVITY_ACTIONS, configureActivityNotifications, handleNotificationResponse, requestNotificationPermissions } from './src/services/notifications';
 import { colors } from './src/theme';
 
 export type RootTabParamList = {
@@ -56,9 +62,25 @@ export default function App() {
   useEffect(() => {
     if (!uid) return;
 
-    const subscription = addNotificationResponseReceivedListener((response) => {
+    const processResponse = (response: NotificationResponse) => {
+      if (response.actionIdentifier === DEFAULT_ACTION_IDENTIFIER) {
+        showNotificationActions(uid, response);
+        return;
+      }
+
       void handleNotificationResponse(uid, response).catch(() => undefined);
+    };
+
+    const subscription = addNotificationResponseReceivedListener((response) => {
+      processResponse(response);
     });
+
+    const lastResponse = getLastNotificationResponse();
+    if (lastResponse) {
+      clearLastNotificationResponse();
+      processResponse(lastResponse);
+    }
+
     return () => subscription.remove();
   }, [uid]);
 
@@ -98,6 +120,21 @@ export default function App() {
       </Tab.Navigator>
     </NavigationContainer>
   );
+}
+
+function showNotificationActions(uid: string, response: NotificationResponse) {
+  const content = response.notification.request.content;
+  const data = content.data as { phase?: string } | undefined;
+  const isCheckIn = data?.phase === 'check-in';
+  const actionIds = isCheckIn
+    ? [ACTIVITY_ACTIONS.yes, ACTIVITY_ACTIONS.notYet, ACTIVITY_ACTIONS.ignore, ACTIVITY_ACTIONS.break]
+    : [ACTIVITY_ACTIONS.accept, ACTIVITY_ACTIONS.ignore, ACTIVITY_ACTIONS.break];
+  const labels = isCheckIn ? ['Yes', 'Not yet', 'Ignore', 'Add Break'] : ['Accept', 'Ignore', 'Break'];
+
+  Alert.alert(content.title ?? 'Activity', content.body ?? '', actionIds.map((actionIdentifier, index) => ({
+    text: labels[index],
+    onPress: () => void handleNotificationResponse(uid, { ...response, actionIdentifier } as NotificationResponse).catch(() => undefined),
+  })));
 }
 
 const styles = StyleSheet.create({
