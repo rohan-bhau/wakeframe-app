@@ -3,12 +3,14 @@ import { createBottomTabNavigator } from '@react-navigation/bottom-tabs';
 import { StatusBar } from 'expo-status-bar';
 import {
   addNotificationResponseReceivedListener,
+  clearLastNotificationResponseAsync,
   DEFAULT_ACTION_IDENTIFIER,
+  getLastNotificationResponseAsync,
 } from 'expo-notifications/build/NotificationsEmitter';
 import { dismissNotificationAsync } from 'expo-notifications/build/dismissNotificationAsync';
 import type { NotificationResponse } from 'expo-notifications/build/Notifications.types';
 import { onAuthStateChanged, signOut } from 'firebase/auth';
-import { useEffect, useState } from 'react';
+import { useEffect, useRef, useState } from 'react';
 import { ActivityIndicator, Alert, Modal, Pressable, StyleSheet, Text, TextInput, View } from 'react-native';
 
 import { auth } from './src/config/firebase';
@@ -47,6 +49,7 @@ export default function App() {
   const [authLoading, setAuthLoading] = useState(true);
   const [breakResponse, setBreakResponse] = useState<NotificationResponse | null>(null);
   const [breakDuration, setBreakDuration] = useState('15');
+  const handledResponses = useRef(new Set<string>());
 
   useEffect(() => onAuthStateChanged(auth, (user) => {
     setUid(user?.uid ?? null);
@@ -65,6 +68,10 @@ export default function App() {
     if (!uid) return;
 
     const processResponse = (response: NotificationResponse) => {
+      const responseKey = `${response.notification.request.identifier}:${response.actionIdentifier}`;
+      if (handledResponses.current.has(responseKey)) return;
+      handledResponses.current.add(responseKey);
+
       void dismissNotificationAsync(response.notification.request.identifier).catch(() => undefined);
 
       if (response.actionIdentifier === DEFAULT_ACTION_IDENTIFIER) {
@@ -82,6 +89,11 @@ export default function App() {
     const subscription = addNotificationResponseReceivedListener((response) => {
       processResponse(response);
     });
+
+    void getLastNotificationResponseAsync().then((response) => {
+      if (response) processResponse(response);
+      return clearLastNotificationResponseAsync();
+    }).catch(() => undefined);
 
     return () => {
       subscription.remove();

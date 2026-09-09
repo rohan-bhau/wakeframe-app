@@ -5,6 +5,8 @@ import { DEFAULT_ACTION_IDENTIFIER } from 'expo-notifications/build/Notification
 import { setNotificationHandler } from 'expo-notifications/build/NotificationsHandler';
 import { BackgroundNotificationTaskResult, registerTaskAsync } from 'expo-notifications/build/registerTaskAsync';
 import { cancelAllScheduledNotificationsAsync } from 'expo-notifications/build/cancelAllScheduledNotificationsAsync';
+import { cancelScheduledNotificationAsync } from 'expo-notifications/build/cancelScheduledNotificationAsync';
+import { getAllScheduledNotificationsAsync } from 'expo-notifications/build/getAllScheduledNotificationsAsync';
 import { scheduleNotificationAsync } from 'expo-notifications/build/scheduleNotificationAsync';
 import { setNotificationCategoryAsync } from 'expo-notifications/build/setNotificationCategoryAsync';
 import { setNotificationChannelAsync } from 'expo-notifications/build/setNotificationChannelAsync';
@@ -80,7 +82,9 @@ export async function configureActivityNotifications() {
     { identifier: ACTIVITY_ACTIONS.break, buttonTitle: 'Add Break', options: { opensAppToForeground: true } },
   ]);
   await setNotificationCategoryAsync(BREAK_OVER_NOTIFICATION_CATEGORY, [
-    { identifier: ACTIVITY_ACTIONS.resume, buttonTitle: 'Resume', options: { opensAppToForeground: true } },
+    { identifier: ACTIVITY_ACTIONS.accept, buttonTitle: 'Accept', options: { opensAppToForeground: true } },
+    { identifier: ACTIVITY_ACTIONS.ignore, buttonTitle: 'Ignore', options: { opensAppToForeground: true } },
+    { identifier: ACTIVITY_ACTIONS.break, buttonTitle: 'Add Break', options: { opensAppToForeground: true } },
   ]);
 }
 
@@ -108,32 +112,28 @@ export async function scheduleTodayActivityNotifications(uid: string, activities
         date: startDate,
       });
     }
-
-    const endDate = getEndDate(now, activity, startDate);
-    if (endDate && endDate > now) {
-      await scheduleNotification({
-        title: `Check in: ${activity.title}`,
-        body: `Did you finish ${activity.title}? Ready for next?`,
-        categoryIdentifier: CHECK_IN_NOTIFICATION_CATEGORY,
-        data: { activityId: activity.id, date: getDateKey(now), uid, phase: 'check-in', maxBreakMinutes: String(activity.maxBreakMinutes ?? 0) },
-        date: endDate,
-      });
-    }
   }
 }
 
 export async function handleNotificationResponse(uid: string, response: NotificationResponse, customBreakDurationMinutes?: number) {
   if (Platform.OS === 'web' || response.actionIdentifier === DEFAULT_ACTION_IDENTIFIER) return;
 
-  const data = getResponseData(response) as { activityId?: unknown; date?: unknown; breakLogId?: unknown };
+  const data = getResponseData(response) as { activityId?: unknown; date?: unknown; breakLogId?: unknown; phase?: unknown };
   if (typeof data.activityId !== 'string' || typeof data.date !== 'string') return;
 
   if (response.actionIdentifier === ACTIVITY_ACTIONS.break) {
     await startBreak(uid, data.activityId, data.date, customBreakDurationMinutes);
     return;
   }
-  if (response.actionIdentifier === ACTIVITY_ACTIONS.resume && typeof data.breakLogId === 'string') {
-    await finishBreak(uid, data.activityId, data.date, data.breakLogId, false);
+  if (data.phase === 'break-over' || data.phase === 'break-cap') {
+    if (typeof data.breakLogId !== 'string') return;
+    if (response.actionIdentifier === ACTIVITY_ACTIONS.accept) {
+      await finishBreak(uid, data.activityId, data.date, data.breakLogId, data.phase === 'break-cap');
+      await scheduleActivityCheckIn(uid, data.activityId, data.date, true);
+    } else if (response.actionIdentifier === ACTIVITY_ACTIONS.ignore) {
+      await finishBreak(uid, data.activityId, data.date, data.breakLogId, data.phase === 'break-cap', 'ignored');
+      await cancelActivityNotifications(data.activityId);
+    }
     return;
   }
 
@@ -154,6 +154,10 @@ export async function handleNotificationResponse(uid: string, response: Notifica
     ...(transition.timestampField ? { [transition.timestampField]: new Date().toISOString() } : {}),
   };
   await setDoc(doc(db, 'users', uid, 'activityInstances', `${data.activityId}_${data.date}`), instance, { merge: true });
+  await cancelActivityNotifications(data.activityId);
+  if (transition.state === 'in_progress') {
+    await scheduleActivityCheckIn(uid, data.activityId, data.date, false);
+  }
 }
 
 export async function startBreak(uid: string, activityId: string, date: string, customDurationMinutes?: number) {
@@ -170,6 +174,8 @@ export async function startBreak(uid: string, activityId: string, date: string, 
   const breakEndsAt = new Date(startedAt.getTime() + plannedDuration * 60_000);
   const breakLogId = `${activityId}_${date}_${startedAt.getTime()}`;
   const instanceId = `${activityId}_${date}`;
+
+  await cancelActivityNotifications(activityId);
 
   await Promise.all([
     setDoc(doc(db, 'users', uid, 'activityInstances', instanceId), {
@@ -192,10 +198,10 @@ export async function startBreak(uid: string, activityId: string, date: string, 
   ]);
 
   await scheduleNotification({
-    title: "Break's over",
-    body: `Break's over, resume ${activity.title}?`,
+    title: `Break complete: ${activity.title}`,
+    body: `Break complete. Accept to continue ${activity.title}, Ignore to stop, or Add Break again.`,
     categoryIdentifier: BREAK_OVER_NOTIFICATION_CATEGORY,
-    data: { activityId, date, uid, breakLogId, phase: 'break-over' },
+    data: { activityId, date, uid, breakLogId, phase: 'break-over', maxBreakMinutes: String(maxBreakMinutes || 0) },
     date: breakEndsAt,
   }).catch(() => undefined);
   if (maxBreakMinutes > plannedDuration) {
@@ -203,17 +209,17 @@ export async function startBreak(uid: string, activityId: string, date: string, 
       title: 'Break limit reached',
       body: `Break limit reached. Resuming ${activity.title}.`,
       categoryIdentifier: BREAK_OVER_NOTIFICATION_CATEGORY,
-      data: { activityId, date, uid, breakLogId, phase: 'break-cap' },
+      data: { activityId, date, uid, breakLogId, phase: 'break-cap', maxBreakMinutes: String(maxBreakMinutes || 0) },
       date: new Date(startedAt.getTime() + maxBreakMinutes * 60_000),
     }).catch(() => undefined);
   }
 }
 
-async function finishBreak(uid: string, activityId: string, date: string, breakLogId: string, exceededCap: boolean) {
+async function finishBreak(uid: string, activityId: string, date: string, breakLogId: string, exceededCap: boolean, state: 'in_progress' | 'ignored' = 'in_progress') {
   const endedAt = new Date().toISOString();
   await Promise.all([
     setDoc(doc(db, 'users', uid, 'activityInstances', `${activityId}_${date}`), {
-      state: 'in_progress',
+      state,
       currentBreakId: null,
       breakEndedAt: endedAt,
     }, { merge: true }),
@@ -223,6 +229,38 @@ async function finishBreak(uid: string, activityId: string, date: string, breakL
       exceeded_cap: exceededCap,
     }, { merge: true }),
   ]);
+}
+
+async function scheduleActivityCheckIn(uid: string, activityId: string, date: string, breakCompleted: boolean) {
+  const activitySnapshot = await getDoc(doc(db, 'users', uid, 'activities', activityId));
+  if (!activitySnapshot.exists()) return;
+
+  const activity = { id: activitySnapshot.id, ...activitySnapshot.data() } as Activity;
+  const now = new Date();
+  const startDate = getTimeOnDate(now, activity.startTime);
+  const endDate = getEndDate(now, activity, startDate);
+  if (!endDate) return;
+
+  const dateKey = getDateKey(now);
+  const notificationDate = endDate > now ? endDate : new Date(now.getTime() + 1000);
+  await scheduleNotification({
+    title: `Check in: ${activity.title}`,
+    body: breakCompleted
+      ? `Break complete. Accept to continue ${activity.title}, Ignore to stop, or Add Break again.`
+      : `Did you finish ${activity.title}? Accept if complete, Ignore to stop, or Add Break.`,
+    categoryIdentifier: CHECK_IN_NOTIFICATION_CATEGORY,
+    data: { activityId, date: date || dateKey, uid, phase: 'check-in', maxBreakMinutes: String(activity.maxBreakMinutes ?? 0) },
+    date: notificationDate,
+  });
+}
+
+async function cancelActivityNotifications(activityId: string) {
+  if (Platform.OS === 'web') return;
+
+  const requests = await getAllScheduledNotificationsAsync();
+  await Promise.all(requests
+    .filter((request) => (request.content.data as { activityId?: unknown } | undefined)?.activityId === activityId)
+    .map((request) => cancelScheduledNotificationAsync(request.identifier)));
 }
 
 async function scheduleNotification({
