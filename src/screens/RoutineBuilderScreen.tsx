@@ -1,4 +1,4 @@
-import { addDoc, collection, onSnapshot, orderBy, query } from 'firebase/firestore';
+import { addDoc, collection, doc, onSnapshot, orderBy, query, writeBatch } from 'firebase/firestore';
 import { useEffect, useState, type ReactNode } from 'react';
 import {
   ActivityIndicator,
@@ -19,6 +19,9 @@ import type { Activity } from '../types';
 
 type ActivityInput = Pick<Activity, 'title' | 'startTime' | 'duration' | 'category'>;
 type ActivityDocument = Omit<Activity, 'id'>;
+type AddActivityMode = '24h' | 'custom';
+
+const days = ['Mon', 'Tue', 'Wed', 'Thu', 'Fri', 'Sat', 'Sun'] as const;
 
 const emptyForm: ActivityInput = {
   title: '',
@@ -30,8 +33,12 @@ const emptyForm: ActivityInput = {
 export function RoutineBuilderScreen({ uid }: { uid: string }) {
   const [form, setForm] = useState<ActivityInput>(emptyForm);
   const [activities, setActivities] = useState<Activity[]>([]);
+  const [selectedDay, setSelectedDay] = useState(0);
+  const [copyDays, setCopyDays] = useState<number[]>([]);
+  const [mode, setMode] = useState<AddActivityMode>('24h');
   const [loading, setLoading] = useState(true);
   const [saving, setSaving] = useState(false);
+  const [copying, setCopying] = useState(false);
   const [error, setError] = useState<string | null>(null);
 
   useEffect(() => {
@@ -50,6 +57,69 @@ export function RoutineBuilderScreen({ uid }: { uid: string }) {
     );
   }, [uid]);
 
+  const activitiesForDay = (day: number) => activities.filter(
+    (activity) => activity.weekday === day || (activity.weekday === undefined && day === 0),
+  );
+  const selectedActivities = activitiesForDay(selectedDay);
+
+  const selectDay = (day: number) => {
+    setSelectedDay(day);
+    setForm(emptyForm);
+    setCopyDays([]);
+  };
+
+  const toggleCopyDay = (day: number) => {
+    if (day === selectedDay) return;
+    setCopyDays((current) => (current.includes(day) ? current.filter((value) => value !== day) : [...current, day]));
+  };
+
+  const copyToDays = (targetDays: number[]) => {
+    const uniqueTargetDays = [...new Set(targetDays)].filter((day) => day !== selectedDay);
+    if (selectedActivities.length === 0 || uniqueTargetDays.length === 0) return;
+
+    const conflictingDays = uniqueTargetDays.filter((day) => activitiesForDay(day).length > 0);
+    if (conflictingDays.length > 0) {
+      Alert.alert(
+        'Activities already exist',
+        `${conflictingDays.map((day) => days[day]).join(', ')} already ${conflictingDays.length === 1 ? 'has' : 'have'} activities. How should they be handled?`,
+        [
+          { text: 'Cancel', style: 'cancel' },
+          { text: 'Merge', onPress: () => void executeCopy(uniqueTargetDays, 'merge') },
+          { text: 'Replace', style: 'destructive', onPress: () => void executeCopy(uniqueTargetDays, 'replace') },
+        ],
+      );
+      return;
+    }
+
+    void executeCopy(uniqueTargetDays, 'merge');
+  };
+
+  const executeCopy = async (targetDays: number[], strategy: 'merge' | 'replace') => {
+    setCopying(true);
+    try {
+      const activityCollection = collection(db, 'users', uid, 'activities');
+      const batch = writeBatch(db);
+      const sourceActivities = selectedActivities.map(({ id: _id, ...activity }) => activity);
+
+      for (const day of targetDays) {
+        if (strategy === 'replace') {
+          activitiesForDay(day).forEach((activity) => batch.delete(doc(activityCollection, activity.id)));
+        }
+        sourceActivities.forEach((activity, index) => {
+          batch.set(doc(activityCollection), { ...activity, weekday: day, sortOrder: index });
+        });
+      }
+
+      await batch.commit();
+      setCopyDays([]);
+      Alert.alert('Routine copied', `Copied ${selectedActivities.length} ${selectedActivities.length === 1 ? 'activity' : 'activities'} to ${targetDays.map((day) => days[day]).join(', ')}.`);
+    } catch {
+      Alert.alert('Could not copy routine', 'Please check your connection and try again.');
+    } finally {
+      setCopying(false);
+    }
+  };
+
   const saveActivity = async () => {
     const title = form.title.trim();
     const category = form.category.trim();
@@ -63,13 +133,14 @@ export function RoutineBuilderScreen({ uid }: { uid: string }) {
     setSaving(true);
     try {
       const activity: ActivityDocument = {
+        weekday: selectedDay,
         title,
         startTime: form.startTime,
         duration,
         category,
         maxBreakMinutes: 0,
         isExtended: false,
-        sortOrder: activities.length,
+        sortOrder: selectedActivities.length,
       };
       await addDoc(collection(db, 'users', uid, 'activities'), activity);
       setForm(emptyForm);
@@ -85,71 +156,99 @@ export function RoutineBuilderScreen({ uid }: { uid: string }) {
       <ScrollView contentContainerStyle={styles.content} keyboardShouldPersistTaps="handled">
         <Text style={styles.eyebrow}>Wakeframe</Text>
         <Text style={styles.title}>Routine Builder</Text>
-        <Text style={styles.description}>Add an activity to your routine and keep the list synced.</Text>
+        <Text style={styles.description}>Build each day of your week, then keep your routine synced.</Text>
+
+        <ScrollView contentContainerStyle={styles.dayTabs} horizontal showsHorizontalScrollIndicator={false}>
+          {days.map((day, index) => (
+            <Pressable
+              accessibilityLabel={`${day} routine`}
+              accessibilityRole="tab"
+              accessibilityState={{ selected: selectedDay === index }}
+              key={day}
+              onPress={() => selectDay(index)}
+              style={[styles.dayTab, selectedDay === index && styles.selectedDayTab]}
+            >
+              <Text style={[styles.dayTabText, selectedDay === index && styles.selectedDayTabText]}>{day}</Text>
+            </Pressable>
+          ))}
+        </ScrollView>
+        <Text style={styles.selectedDayLabel}>{days[selectedDay]} activities</Text>
 
         <View style={styles.form}>
-          <Field label="Title">
-            <TextInput
-              accessibilityLabel="Activity title"
-              onChangeText={(title) => setForm((current) => ({ ...current, title }))}
-              placeholder="Deep work"
-              placeholderTextColor={colors.outline}
-              style={styles.input}
-              value={form.title}
-            />
-          </Field>
-          <View style={styles.row}>
-            <View style={styles.half}>
-              <Field label="Start time">
-                <TextInput
-                  accessibilityLabel="Activity start time"
-                  keyboardType="numbers-and-punctuation"
-                  maxLength={5}
-                  onChangeText={(startTime) => setForm((current) => ({ ...current, startTime }))}
-                  placeholder="09:00"
-                  placeholderTextColor={colors.outline}
-                  style={styles.input}
-                  value={form.startTime}
-                />
-              </Field>
-            </View>
-            <View style={styles.half}>
-              <Field label="Duration (minutes)">
-                <TextInput
-                  accessibilityLabel="Activity duration"
-                  keyboardType="number-pad"
-                  onChangeText={(value) => setForm((current) => ({ ...current, duration: value ? Number(value) : undefined }))}
-                  placeholder="60"
-                  placeholderTextColor={colors.outline}
-                  style={styles.input}
-                  value={form.duration === undefined ? '' : String(form.duration)}
-                />
-              </Field>
-            </View>
+          <Text style={styles.formTitle}>Add activity</Text>
+          <View accessibilityRole="radiogroup" style={styles.modeToggle}>
+            <ModeOption label="24-Hour Mode" mode="24h" selectedMode={mode} onPress={setMode} />
+            <ModeOption label="Custom Mode" mode="custom" selectedMode={mode} onPress={setMode} />
           </View>
-          <Field label="Category">
-            <TextInput
-              accessibilityLabel="Activity category"
-              onChangeText={(category) => setForm((current) => ({ ...current, category }))}
-              placeholder="Work"
-              placeholderTextColor={colors.outline}
-              style={styles.input}
-              value={form.category}
-            />
-          </Field>
-          <Pressable accessibilityRole="button" disabled={saving} onPress={saveActivity} style={styles.button}>
-            {saving ? <ActivityIndicator color={colors.background} /> : <Text style={styles.buttonText}>Save activity</Text>}
-          </Pressable>
+
+          {mode === 'custom' ? (
+            <Text style={styles.modePlaceholder}>Custom mode coming in Phase 2</Text>
+          ) : (
+            <>
+              <Field label="Title">
+                <TextInput
+                  accessibilityLabel="Activity title"
+                  onChangeText={(title) => setForm((current) => ({ ...current, title }))}
+                  placeholder="Deep work"
+                  placeholderTextColor={colors.outline}
+                  style={styles.input}
+                  value={form.title}
+                />
+              </Field>
+              <View style={styles.row}>
+                <View style={styles.half}>
+                  <Field label="Start time">
+                    <TextInput
+                      accessibilityLabel="Activity start time"
+                      keyboardType="numbers-and-punctuation"
+                      maxLength={5}
+                      onChangeText={(startTime) => setForm((current) => ({ ...current, startTime }))}
+                      placeholder="09:00"
+                      placeholderTextColor={colors.outline}
+                      style={styles.input}
+                      value={form.startTime}
+                    />
+                  </Field>
+                </View>
+                <View style={styles.half}>
+                  <Field label="Duration (minutes)">
+                    <TextInput
+                      accessibilityLabel="Activity duration"
+                      keyboardType="number-pad"
+                      onChangeText={(value) => setForm((current) => ({ ...current, duration: value ? Number(value) : undefined }))}
+                      placeholder="60"
+                      placeholderTextColor={colors.outline}
+                      style={styles.input}
+                      value={form.duration === undefined ? '' : String(form.duration)}
+                    />
+                  </Field>
+                </View>
+              </View>
+              <Field label="Category">
+                <TextInput
+                  accessibilityLabel="Activity category"
+                  onChangeText={(category) => setForm((current) => ({ ...current, category }))}
+                  placeholder="Work"
+                  placeholderTextColor={colors.outline}
+                  style={styles.input}
+                  value={form.category}
+                />
+              </Field>
+              <Pressable accessibilityRole="button" disabled={saving} onPress={saveActivity} style={styles.button}>
+                {saving ? <ActivityIndicator color={colors.background} /> : <Text style={styles.buttonText}>Save activity</Text>}
+              </Pressable>
+            </>
+          )}
         </View>
 
         <View style={styles.listHeader}>
           <Text style={styles.sectionTitle}>Saved activities</Text>
-          <Text style={styles.count}>{activities.length}</Text>
+          <Text style={styles.count}>{selectedActivities.length}</Text>
         </View>
         {loading ? <ActivityIndicator color={colors.tertiary} style={styles.loader} /> : null}
         {error ? <Text style={styles.error}>{error}</Text> : null}
-        {!loading && !error && activities.length === 0 ? <Text style={styles.empty}>No activities saved yet.</Text> : null}
-        {activities.map((activity) => (
+        {!loading && !error && selectedActivities.length === 0 ? <Text style={styles.empty}>No activities saved for {days[selectedDay]} yet.</Text> : null}
+        {selectedActivities.map((activity) => (
           <View key={activity.id} style={styles.activity}>
             <View style={styles.activityTime}>
               <Text style={styles.time}>{activity.startTime}</Text>
@@ -161,6 +260,44 @@ export function RoutineBuilderScreen({ uid }: { uid: string }) {
             </View>
           </View>
         ))}
+        {!loading && !error && selectedActivities.length > 0 ? (
+          <View style={styles.copyPanel}>
+            <Text style={styles.copyTitle}>Copy to other days</Text>
+            <Text style={styles.copyDescription}>Duplicate this day&apos;s full activity list.</Text>
+            <View style={styles.copyDayRow}>
+              {days.map((day, index) => {
+                const isCurrentDay = index === selectedDay;
+                const isCopyDay = copyDays.includes(index);
+                return (
+                  <Pressable
+                    accessibilityLabel={`${day} copy target`}
+                    accessibilityRole="checkbox"
+                    accessibilityState={{ disabled: isCurrentDay, selected: isCopyDay }}
+                    disabled={isCurrentDay || copying}
+                    key={day}
+                    onPress={() => toggleCopyDay(index)}
+                    style={[styles.copyDay, isCopyDay && styles.selectedCopyDay, isCurrentDay && styles.currentCopyDay]}
+                  >
+                    <Text style={[styles.copyDayText, isCopyDay && styles.selectedCopyDayText, isCurrentDay && styles.currentCopyDayText]}>{day}</Text>
+                  </Pressable>
+                );
+              })}
+            </View>
+            <View style={styles.copyActions}>
+              <Pressable
+                accessibilityRole="button"
+                disabled={copying || copyDays.length === 0}
+                onPress={() => copyToDays(copyDays)}
+                style={[styles.copyButton, (copying || copyDays.length === 0) && styles.disabledCopyButton]}
+              >
+                {copying ? <ActivityIndicator color={colors.background} /> : <Text style={styles.copyButtonText}>Copy selected</Text>}
+              </Pressable>
+              <Pressable accessibilityRole="button" disabled={copying} onPress={() => copyToDays(days.map((_, index) => index))} style={styles.allDaysButton}>
+                <Text style={styles.allDaysButtonText}>All 7 days</Text>
+              </Pressable>
+            </View>
+          </View>
+        ) : null}
       </ScrollView>
     </KeyboardAvoidingView>
   );
@@ -175,13 +312,68 @@ function Field({ label, children }: { label: string; children: ReactNode }) {
   );
 }
 
+function ModeOption({
+  label,
+  mode,
+  selectedMode,
+  onPress,
+}: {
+  label: string;
+  mode: AddActivityMode;
+  selectedMode: AddActivityMode;
+  onPress: (mode: AddActivityMode) => void;
+}) {
+  const selected = mode === selectedMode;
+
+  return (
+    <Pressable
+      accessibilityLabel={label}
+      accessibilityRole="radio"
+      accessibilityState={{ selected }}
+      onPress={() => onPress(mode)}
+      style={[styles.modeOption, selected && styles.selectedModeOption]}
+    >
+      <Text style={[styles.modeOptionText, selected && styles.selectedModeOptionText]}>{label}</Text>
+    </Pressable>
+  );
+}
+
 const styles = StyleSheet.create({
   screen: { flex: 1, backgroundColor: colors.background },
   content: { padding: 20, paddingTop: 32, paddingBottom: 40 },
   eyebrow: { color: colors.tertiary, fontSize: 12, letterSpacing: 1, marginBottom: 12 },
   title: { color: colors.onSurface, fontSize: 32, fontWeight: '500', marginBottom: 12 },
   description: { color: colors.onSurfaceVariant, fontSize: 16, lineHeight: 24, marginBottom: 24 },
+  dayTabs: { gap: 8, paddingBottom: 8 },
+  dayTab: { alignItems: 'center', borderColor: colors.outlineVariant, borderWidth: 1, justifyContent: 'center', minWidth: 48, minHeight: 42, paddingHorizontal: 10 },
+  selectedDayTab: { backgroundColor: colors.tertiary, borderColor: colors.tertiary },
+  dayTabText: { color: colors.onSurfaceVariant, fontSize: 13, fontWeight: '600' },
+  selectedDayTabText: { color: colors.background },
+  selectedDayLabel: { color: colors.tertiary, fontSize: 13, fontWeight: '600', letterSpacing: 0.5, marginBottom: 12, marginTop: 8 },
   form: { backgroundColor: colors.surfaceContainer, borderColor: colors.outlineVariant, borderWidth: 1, padding: 16 },
+  formTitle: { color: colors.onSurface, fontSize: 20, fontWeight: '500', marginBottom: 14 },
+  modeToggle: { flexDirection: 'row', marginBottom: 20 },
+  modeOption: { alignItems: 'center', borderColor: colors.outlineVariant, borderWidth: 1, flex: 1, justifyContent: 'center', minHeight: 44, paddingHorizontal: 8 },
+  selectedModeOption: { backgroundColor: colors.tertiary, borderColor: colors.tertiary },
+  modeOptionText: { color: colors.onSurfaceVariant, fontSize: 13, fontWeight: '600', textAlign: 'center' },
+  selectedModeOptionText: { color: colors.background },
+  modePlaceholder: { color: colors.onSurfaceVariant, fontSize: 15, lineHeight: 22, paddingBottom: 8, paddingTop: 8, textAlign: 'center' },
+  copyPanel: { borderColor: colors.outlineVariant, borderTopWidth: 1, marginTop: 28, paddingTop: 20 },
+  copyTitle: { color: colors.onSurface, fontSize: 20, fontWeight: '500', marginBottom: 6 },
+  copyDescription: { color: colors.onSurfaceVariant, fontSize: 14, marginBottom: 14 },
+  copyDayRow: { flexDirection: 'row', gap: 6 },
+  copyDay: { alignItems: 'center', borderColor: colors.outlineVariant, borderWidth: 1, flex: 1, justifyContent: 'center', minHeight: 38 },
+  selectedCopyDay: { backgroundColor: colors.progressTeal, borderColor: colors.progressTeal },
+  currentCopyDay: { backgroundColor: colors.surfaceContainerHigh },
+  copyDayText: { color: colors.onSurfaceVariant, fontSize: 12, fontWeight: '600' },
+  selectedCopyDayText: { color: colors.background },
+  currentCopyDayText: { color: colors.outline },
+  copyActions: { flexDirection: 'row', gap: 8, marginTop: 12 },
+  copyButton: { alignItems: 'center', backgroundColor: colors.tertiary, flex: 1, justifyContent: 'center', minHeight: 44, paddingHorizontal: 10 },
+  disabledCopyButton: { opacity: 0.45 },
+  copyButtonText: { color: colors.background, fontSize: 13, fontWeight: '600' },
+  allDaysButton: { alignItems: 'center', borderColor: colors.tertiary, borderWidth: 1, flex: 1, justifyContent: 'center', minHeight: 44, paddingHorizontal: 10 },
+  allDaysButtonText: { color: colors.tertiary, fontSize: 13, fontWeight: '600' },
   field: { marginBottom: 16 },
   label: { color: colors.onSurfaceVariant, fontSize: 12, marginBottom: 6 },
   input: { borderBottomColor: colors.outlineVariant, borderBottomWidth: 1, color: colors.onSurface, fontSize: 16, minHeight: 44, paddingVertical: 8 },
