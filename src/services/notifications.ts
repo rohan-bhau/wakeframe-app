@@ -1,4 +1,13 @@
-import * as Notifications from 'expo-notifications';
+import { AndroidImportance } from 'expo-notifications/build/NotificationChannelManager.types';
+import { getPermissionsAsync, requestPermissionsAsync } from 'expo-notifications/build/NotificationPermissions';
+import { SchedulableTriggerInputTypes, type NotificationResponse, type NotificationTaskPayload } from 'expo-notifications/build/Notifications.types';
+import { DEFAULT_ACTION_IDENTIFIER } from 'expo-notifications/build/NotificationsEmitter';
+import { setNotificationHandler } from 'expo-notifications/build/NotificationsHandler';
+import { BackgroundNotificationTaskResult, registerTaskAsync } from 'expo-notifications/build/registerTaskAsync';
+import { cancelAllScheduledNotificationsAsync } from 'expo-notifications/build/cancelAllScheduledNotificationsAsync';
+import { scheduleNotificationAsync } from 'expo-notifications/build/scheduleNotificationAsync';
+import { setNotificationCategoryAsync } from 'expo-notifications/build/setNotificationCategoryAsync';
+import { setNotificationChannelAsync } from 'expo-notifications/build/setNotificationChannelAsync';
 import * as TaskManager from 'expo-task-manager';
 import { collection, doc, getDoc, setDoc } from 'firebase/firestore';
 import { Platform } from 'react-native';
@@ -28,7 +37,7 @@ type BreakNotificationData = {
   phase: 'break-over' | 'break-cap';
 };
 
-Notifications.setNotificationHandler({
+setNotificationHandler({
   handleNotification: async () => ({
     shouldPlaySound: true,
     shouldSetBadge: false,
@@ -40,10 +49,10 @@ Notifications.setNotificationHandler({
 export async function requestNotificationPermissions() {
   if (Platform.OS === 'web') return false;
 
-  const current = await Notifications.getPermissionsAsync();
+  const current = await getPermissionsAsync();
   if (current.granted) return true;
 
-  const requested = await Notifications.requestPermissionsAsync();
+  const requested = await requestPermissionsAsync();
   return requested.granted;
 }
 
@@ -51,25 +60,25 @@ export async function configureActivityNotifications() {
   if (Platform.OS === 'web') return;
 
   if (Platform.OS === 'android') {
-    await Notifications.setNotificationChannelAsync('activity-reminders', {
+    await setNotificationChannelAsync('activity-reminders', {
       name: 'Activity reminders',
-      importance: Notifications.AndroidImportance.HIGH,
+      importance: AndroidImportance.HIGH,
       sound: 'default',
     });
   }
 
-  await Notifications.setNotificationCategoryAsync(ACTIVITY_NOTIFICATION_CATEGORY, [
+  await setNotificationCategoryAsync(ACTIVITY_NOTIFICATION_CATEGORY, [
     { identifier: ACTIVITY_ACTIONS.accept, buttonTitle: 'Accept', options: { opensAppToForeground: false } },
     { identifier: ACTIVITY_ACTIONS.ignore, buttonTitle: 'Ignore', options: { opensAppToForeground: false } },
     { identifier: ACTIVITY_ACTIONS.break, buttonTitle: 'Break', options: { opensAppToForeground: false } },
   ]);
-  await Notifications.setNotificationCategoryAsync(CHECK_IN_NOTIFICATION_CATEGORY, [
+  await setNotificationCategoryAsync(CHECK_IN_NOTIFICATION_CATEGORY, [
     { identifier: ACTIVITY_ACTIONS.yes, buttonTitle: 'Yes', options: { opensAppToForeground: false } },
     { identifier: ACTIVITY_ACTIONS.notYet, buttonTitle: 'Not yet', options: { opensAppToForeground: false } },
     { identifier: ACTIVITY_ACTIONS.ignore, buttonTitle: 'Ignore', options: { opensAppToForeground: false } },
     { identifier: ACTIVITY_ACTIONS.break, buttonTitle: 'Add Break', options: { opensAppToForeground: false } },
   ]);
-  await Notifications.setNotificationCategoryAsync(BREAK_OVER_NOTIFICATION_CATEGORY, [
+  await setNotificationCategoryAsync(BREAK_OVER_NOTIFICATION_CATEGORY, [
     { identifier: ACTIVITY_ACTIONS.resume, buttonTitle: 'Resume', options: { opensAppToForeground: false } },
   ]);
 }
@@ -79,7 +88,7 @@ export async function scheduleTodayActivityNotifications(uid: string, activities
   if (!(await requestNotificationPermissions())) return;
 
   await configureActivityNotifications();
-  await Notifications.cancelAllScheduledNotificationsAsync();
+  await cancelAllScheduledNotificationsAsync();
 
   const now = new Date();
   const today = (now.getDay() + 6) % 7;
@@ -112,8 +121,8 @@ export async function scheduleTodayActivityNotifications(uid: string, activities
   }
 }
 
-export async function handleNotificationResponse(uid: string, response: Notifications.NotificationResponse) {
-  if (Platform.OS === 'web' || response.actionIdentifier === Notifications.DEFAULT_ACTION_IDENTIFIER) return;
+export async function handleNotificationResponse(uid: string, response: NotificationResponse) {
+  if (Platform.OS === 'web' || response.actionIdentifier === DEFAULT_ACTION_IDENTIFIER) return;
 
   const data = (response.notification.request.content.data ?? {}) as { activityId?: unknown; date?: unknown; breakLogId?: unknown };
   if (typeof data.activityId !== 'string' || typeof data.date !== 'string') return;
@@ -232,9 +241,9 @@ async function scheduleNotification({
   data: Record<string, string>;
   date: Date;
 }) {
-  await Notifications.scheduleNotificationAsync({
+  await scheduleNotificationAsync({
     content: { title, body, categoryIdentifier, data, sound: 'default' },
-    trigger: { type: Notifications.SchedulableTriggerInputTypes.DATE, date },
+    trigger: { type: SchedulableTriggerInputTypes.DATE, date },
   });
 }
 
@@ -268,19 +277,19 @@ function getEndDate(date: Date, activity: Activity, startDate: Date | null) {
   return null;
 }
 
-TaskManager.defineTask<Notifications.NotificationTaskPayload>(BREAK_CAP_TASK, async ({ data }) => {
-  if ('actionIdentifier' in data) return Notifications.BackgroundNotificationTaskResult.NoData;
+TaskManager.defineTask<NotificationTaskPayload>(BREAK_CAP_TASK, async ({ data }) => {
+  if ('actionIdentifier' in data) return BackgroundNotificationTaskResult.NoData;
 
   const payload = data.data?.dataString ? JSON.parse(data.data.dataString) : data.data;
   const breakData = payload as Partial<BreakNotificationData>;
   if (breakData.phase !== 'break-cap' || !breakData.uid || !breakData.activityId || !breakData.date || !breakData.breakLogId) {
-    return Notifications.BackgroundNotificationTaskResult.NoData;
+    return BackgroundNotificationTaskResult.NoData;
   }
 
   await finishBreak(breakData.uid, breakData.activityId, breakData.date, breakData.breakLogId, true);
-  return Notifications.BackgroundNotificationTaskResult.NewData;
+  return BackgroundNotificationTaskResult.NewData;
 });
 
 if (Platform.OS !== 'web') {
-  void Notifications.registerTaskAsync(BREAK_CAP_TASK).catch(() => undefined);
+  void registerTaskAsync(BREAK_CAP_TASK).catch(() => undefined);
 }

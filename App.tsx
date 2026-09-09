@@ -1,7 +1,7 @@
 import { NavigationContainer, DarkTheme } from '@react-navigation/native';
 import { createBottomTabNavigator } from '@react-navigation/bottom-tabs';
 import { StatusBar } from 'expo-status-bar';
-import * as Notifications from 'expo-notifications';
+import { addNotificationResponseReceivedListener } from 'expo-notifications/build/NotificationsEmitter';
 import { onAuthStateChanged, signOut } from 'firebase/auth';
 import { useEffect, useState } from 'react';
 import { ActivityIndicator, StyleSheet, View } from 'react-native';
@@ -56,7 +56,7 @@ export default function App() {
   useEffect(() => {
     if (!uid) return;
 
-    const subscription = Notifications.addNotificationResponseReceivedListener((response) => {
+    const subscription = addNotificationResponseReceivedListener((response) => {
       void handleNotificationResponse(uid, response).catch(() => undefined);
     });
     return () => subscription.remove();
