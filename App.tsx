@@ -1,6 +1,7 @@
 import { NavigationContainer, DarkTheme } from '@react-navigation/native';
 import { createBottomTabNavigator } from '@react-navigation/bottom-tabs';
 import { StatusBar } from 'expo-status-bar';
+import * as Notifications from 'expo-notifications';
 import { onAuthStateChanged, signOut } from 'firebase/auth';
 import { useEffect, useState } from 'react';
 import { ActivityIndicator, StyleSheet, View } from 'react-native';
@@ -11,7 +12,7 @@ import { AuthScreen } from './src/screens/AuthScreen';
 import { RoutineBuilderScreen } from './src/screens/RoutineBuilderScreen';
 import { SettingsScreen } from './src/screens/SettingsScreen';
 import { TodayScreen } from './src/screens/TodayScreen';
-import { configureActivityNotifications, requestNotificationPermissions } from './src/services/notifications';
+import { configureActivityNotifications, handleNotificationResponse, requestNotificationPermissions } from './src/services/notifications';
 import { colors } from './src/theme';
 
 export type RootTabParamList = {
@@ -50,6 +51,15 @@ export default function App() {
     void requestNotificationPermissions().then((granted) => {
       if (granted) void configureActivityNotifications();
     });
+  }, [uid]);
+
+  useEffect(() => {
+    if (!uid) return;
+
+    const subscription = Notifications.addNotificationResponseReceivedListener((response) => {
+      void handleNotificationResponse(uid, response).catch(() => undefined);
+    });
+    return () => subscription.remove();
   }, [uid]);
 
   if (authLoading) {
