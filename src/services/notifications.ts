@@ -125,7 +125,7 @@ export async function scheduleTodayActivityNotifications(uid: string, activities
 export async function handleNotificationResponse(uid: string, response: NotificationResponse) {
   if (Platform.OS === 'web' || response.actionIdentifier === DEFAULT_ACTION_IDENTIFIER) return;
 
-  const data = (response.notification.request.content.data ?? {}) as { activityId?: unknown; date?: unknown; breakLogId?: unknown };
+  const data = getResponseData(response) as { activityId?: unknown; date?: unknown; breakLogId?: unknown };
   if (typeof data.activityId !== 'string' || typeof data.date !== 'string') return;
 
   if (response.actionIdentifier === ACTIVITY_ACTIONS.break) {
@@ -280,14 +280,23 @@ function getEndDate(date: Date, activity: Activity, startDate: Date | null) {
 
 TaskManager.defineTask<NotificationTaskPayload>(BREAK_CAP_TASK, async ({ data }) => {
   if ('actionIdentifier' in data) {
-    const responseData = data.notification.request.content.data as { uid?: unknown };
-    if (typeof responseData.uid === 'string') await handleNotificationResponse(responseData.uid, data);
+    const responseData = getResponseData(data);
+    if (typeof responseData?.uid !== 'string') return BackgroundNotificationTaskResult.NoData;
+
+    await handleNotificationResponse(responseData.uid, data);
     return BackgroundNotificationTaskResult.NewData;
   }
 
-  const payload = data.data?.dataString ? JSON.parse(data.data.dataString) : data.data;
+  let payload: unknown = data.data;
+  if (data.data?.dataString) {
+    try {
+      payload = JSON.parse(data.data.dataString);
+    } catch {
+      return BackgroundNotificationTaskResult.NoData;
+    }
+  }
   const breakData = payload as Partial<BreakNotificationData>;
-  if (breakData.phase !== 'break-cap' || !breakData.uid || !breakData.activityId || !breakData.date || !breakData.breakLogId) {
+  if (!breakData || breakData.phase !== 'break-cap' || !breakData.uid || !breakData.activityId || !breakData.date || !breakData.breakLogId) {
     return BackgroundNotificationTaskResult.NoData;
   }
 
@@ -297,4 +306,12 @@ TaskManager.defineTask<NotificationTaskPayload>(BREAK_CAP_TASK, async ({ data })
 
 if (Platform.OS !== 'web') {
   void registerTaskAsync(BREAK_CAP_TASK).catch(() => undefined);
+}
+
+function getResponseData(response: NotificationResponse) {
+  const notification = response.notification as unknown as {
+    request?: { content?: { data?: Record<string, unknown> } };
+    data?: Record<string, unknown>;
+  } | undefined;
+  return notification?.request?.content?.data ?? notification?.data ?? {};
 }
