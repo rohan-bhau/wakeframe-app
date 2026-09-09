@@ -1,12 +1,9 @@
 import { NavigationContainer, DarkTheme } from '@react-navigation/native';
 import { createBottomTabNavigator } from '@react-navigation/bottom-tabs';
-import AsyncStorage from '@react-native-async-storage/async-storage';
 import { StatusBar } from 'expo-status-bar';
 import {
   addNotificationResponseReceivedListener,
-  clearLastNotificationResponse,
   DEFAULT_ACTION_IDENTIFIER,
-  getLastNotificationResponse,
 } from 'expo-notifications/build/NotificationsEmitter';
 import { dismissNotificationAsync } from 'expo-notifications/build/dismissNotificationAsync';
 import type { NotificationResponse } from 'expo-notifications/build/Notifications.types';
@@ -32,7 +29,6 @@ export type RootTabParamList = {
 
 const Tab = createBottomTabNavigator<RootTabParamList>();
 const quickBreakDurations = [5, 10, 15, 30];
-const handledResponseKey = 'wakeframe.handled-notification-response';
 
 const navigationTheme = {
   ...DarkTheme,
@@ -69,13 +65,9 @@ export default function App() {
     if (!uid) return;
 
     const processResponse = (response: NotificationResponse) => {
-      const responseKey = `${response.notification.request.identifier}:${response.actionIdentifier}`;
-      if (handledResponseIds.has(responseKey)) return;
-      handledResponseIds.add(responseKey);
       void dismissNotificationAsync(response.notification.request.identifier).catch(() => undefined);
 
       if (response.actionIdentifier === DEFAULT_ACTION_IDENTIFIER) {
-        showNotificationActions(uid, response, setBreakResponse, setBreakDuration);
         return;
       }
       if (response.actionIdentifier === ACTIVITY_ACTIONS.break) {
@@ -91,11 +83,7 @@ export default function App() {
       processResponse(response);
     });
 
-    let active = true;
-    void consumeLastResponse(processResponse, () => { if (active) clearLastNotificationResponse(); });
-
     return () => {
-      active = false;
       subscription.remove();
     };
   }, [uid]);
@@ -160,58 +148,6 @@ export default function App() {
       />
     </>
   );
-}
-
-const handledResponseIds = new Set<string>();
-
-async function consumeLastResponse(
-  processResponse: (response: NotificationResponse) => void,
-  clearResponse: () => void,
-) {
-  let lastResponse: NotificationResponse | null = null;
-  try {
-    lastResponse = getLastNotificationResponse();
-  } catch {
-    return;
-  }
-  if (!lastResponse) return;
-
-  const responseKey = `${lastResponse.notification.request.identifier}:${lastResponse.actionIdentifier}`;
-  if (await AsyncStorage.getItem(`${handledResponseKey}:${responseKey}`)) {
-    clearResponse();
-    return;
-  }
-
-  await AsyncStorage.setItem(`${handledResponseKey}:${responseKey}`, '1');
-  clearResponse();
-  processResponse(lastResponse);
-}
-
-function showNotificationActions(
-  uid: string,
-  response: NotificationResponse,
-  onBreak: (response: NotificationResponse) => void,
-  onChangeBreakDuration: (duration: string) => void,
-) {
-  const content = response.notification.request.content;
-  const data = content.data as { phase?: string } | undefined;
-  const isCheckIn = data?.phase === 'check-in';
-  const actionIds = isCheckIn
-    ? [ACTIVITY_ACTIONS.yes, ACTIVITY_ACTIONS.notYet, ACTIVITY_ACTIONS.ignore, ACTIVITY_ACTIONS.break]
-    : [ACTIVITY_ACTIONS.accept, ACTIVITY_ACTIONS.ignore, ACTIVITY_ACTIONS.break];
-  const labels = isCheckIn ? ['Yes', 'Not yet', 'Ignore', 'Add Break'] : ['Accept', 'Ignore', 'Break'];
-
-  Alert.alert(content.title ?? 'Activity', content.body ?? '', actionIds.map((actionIdentifier, index) => ({
-    text: labels[index],
-    onPress: () => {
-      if (actionIdentifier === ACTIVITY_ACTIONS.break) {
-        onChangeBreakDuration('15');
-        onBreak(response);
-        return;
-      }
-      void handleNotificationResponse(uid, { ...response, actionIdentifier } as NotificationResponse).catch(() => undefined);
-    },
-  })));
 }
 
 function BreakDurationModal({

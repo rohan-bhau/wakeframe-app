@@ -280,6 +280,8 @@ function getEndDate(date: Date, activity: Activity, startDate: Date | null) {
 
 TaskManager.defineTask<NotificationTaskPayload>(BREAK_CAP_TASK, async ({ data }) => {
   if ('actionIdentifier' in data) {
+    if (data.actionIdentifier === ACTIVITY_ACTIONS.break) return BackgroundNotificationTaskResult.NoData;
+
     const responseData = getResponseData(data);
     if (typeof responseData?.uid !== 'string') return BackgroundNotificationTaskResult.NoData;
 
