@@ -141,7 +141,11 @@ export default function App() {
             const responseToHandle = breakResponse;
             setBreakResponse(null);
             void handleNotificationResponse(uid, responseToHandle, actualDuration)
-              .catch(() => Alert.alert('Could not start break', 'Please try again.'));
+              .catch((error: unknown) => {
+                const message = error instanceof Error ? error.message : String(error);
+                console.error('Could not start break:', error);
+                Alert.alert('Could not start break', message);
+              });
           }}
           requestedDuration={Number(breakDuration)}
           maxBreakMinutes={Number((breakResponse.notification.request.content.data as { maxBreakMinutes?: string } | undefined)?.maxBreakMinutes)}
