@@ -279,7 +279,11 @@ function getEndDate(date: Date, activity: Activity, startDate: Date | null) {
 }
 
 TaskManager.defineTask<NotificationTaskPayload>(BREAK_CAP_TASK, async ({ data }) => {
-  if ('actionIdentifier' in data) return BackgroundNotificationTaskResult.NoData;
+  if ('actionIdentifier' in data) {
+    const responseData = data.notification.request.content.data as { uid?: unknown };
+    if (typeof responseData.uid === 'string') await handleNotificationResponse(responseData.uid, data);
+    return BackgroundNotificationTaskResult.NewData;
+  }
 
   const payload = data.data?.dataString ? JSON.parse(data.data.dataString) : data.data;
   const breakData = payload as Partial<BreakNotificationData>;
