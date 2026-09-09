@@ -11,6 +11,7 @@ import { AuthScreen } from './src/screens/AuthScreen';
 import { RoutineBuilderScreen } from './src/screens/RoutineBuilderScreen';
 import { SettingsScreen } from './src/screens/SettingsScreen';
 import { TodayScreen } from './src/screens/TodayScreen';
+import { configureActivityNotifications, requestNotificationPermissions } from './src/services/notifications';
 import { colors } from './src/theme';
 
 export type RootTabParamList = {
@@ -42,6 +43,14 @@ export default function App() {
     setUid(user?.uid ?? null);
     setAuthLoading(false);
   }), []);
+
+  useEffect(() => {
+    if (!uid) return;
+
+    void requestNotificationPermissions().then((granted) => {
+      if (granted) void configureActivityNotifications();
+    });
+  }, [uid]);
 
   if (authLoading) {
     return (
