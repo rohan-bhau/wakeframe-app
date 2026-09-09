@@ -76,7 +76,7 @@ export async function configureActivityNotifications() {
     { identifier: ACTIVITY_ACTIONS.break, buttonTitle: 'Break', options: { opensAppToForeground: true } },
   ]);
   await setNotificationCategoryAsync(CHECK_IN_NOTIFICATION_CATEGORY, [
-    { identifier: ACTIVITY_ACTIONS.yes, buttonTitle: 'Yes', options: { opensAppToForeground: true } },
+    { identifier: ACTIVITY_ACTIONS.yes, buttonTitle: 'Accept', options: { opensAppToForeground: true } },
     { identifier: ACTIVITY_ACTIONS.notYet, buttonTitle: 'Not yet', options: { opensAppToForeground: true } },
     { identifier: ACTIVITY_ACTIONS.ignore, buttonTitle: 'Ignore', options: { opensAppToForeground: true } },
     { identifier: ACTIVITY_ACTIONS.break, buttonTitle: 'Add Break', options: { opensAppToForeground: true } },
