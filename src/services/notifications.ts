@@ -10,7 +10,7 @@ import { setNotificationCategoryAsync } from 'expo-notifications/build/setNotifi
 import { setNotificationChannelAsync } from 'expo-notifications/build/setNotificationChannelAsync';
 import { isRunningInExpoGo } from 'expo';
 import * as TaskManager from 'expo-task-manager';
-import { collection, doc, getDoc, setDoc } from 'firebase/firestore';
+import { doc, getDoc, setDoc } from 'firebase/firestore';
 import { Platform } from 'react-native';
 
 import { db } from '../config/firebase';
@@ -157,18 +157,13 @@ export async function handleNotificationResponse(uid: string, response: Notifica
 }
 
 export async function startBreak(uid: string, activityId: string, date: string, customDurationMinutes?: number) {
-  const [activitySnapshot, userSnapshot] = await Promise.all([
-    getDoc(doc(db, 'users', uid, 'activities', activityId)),
-    getDoc(doc(db, 'users', uid)),
-  ]);
+  const activitySnapshot = await getDoc(doc(db, 'users', uid, 'activities', activityId));
   if (!activitySnapshot.exists()) return;
 
   const activity = { id: activitySnapshot.id, ...activitySnapshot.data() } as Activity;
-  const userData = userSnapshot.exists() ? userSnapshot.data() : undefined;
-  const defaultDuration = Number(userData?.defaultBreakDuration);
   const requestedDuration = Number.isFinite(customDurationMinutes) && (customDurationMinutes ?? 0) > 0
     ? customDurationMinutes ?? DEFAULT_BREAK_MINUTES
-    : Number.isFinite(defaultDuration) && defaultDuration > 0 ? defaultDuration : DEFAULT_BREAK_MINUTES;
+    : DEFAULT_BREAK_MINUTES;
   const maxBreakMinutes = Number(activity.maxBreakMinutes);
   const plannedDuration = maxBreakMinutes > 0 ? Math.min(requestedDuration, maxBreakMinutes) : requestedDuration;
   const startedAt = new Date();
@@ -194,23 +189,24 @@ export async function startBreak(uid: string, activityId: string, date: string, 
       exceededCap: false,
       exceeded_cap: false,
     }),
-    scheduleNotification({
-      title: "Break's over",
-      body: `Break's over, resume ${activity.title}?`,
-      categoryIdentifier: BREAK_OVER_NOTIFICATION_CATEGORY,
-      data: { activityId, date, uid, breakLogId, phase: 'break-over' },
-      date: breakEndsAt,
-    }),
-    maxBreakMinutes > plannedDuration
-      ? scheduleNotification({
-          title: 'Break limit reached',
-          body: `Break limit reached. Resuming ${activity.title}.`,
-          categoryIdentifier: BREAK_OVER_NOTIFICATION_CATEGORY,
-          data: { activityId, date, uid, breakLogId, phase: 'break-cap' },
-          date: new Date(startedAt.getTime() + maxBreakMinutes * 60_000),
-        })
-      : Promise.resolve(),
   ]);
+
+  await scheduleNotification({
+    title: "Break's over",
+    body: `Break's over, resume ${activity.title}?`,
+    categoryIdentifier: BREAK_OVER_NOTIFICATION_CATEGORY,
+    data: { activityId, date, uid, breakLogId, phase: 'break-over' },
+    date: breakEndsAt,
+  }).catch(() => undefined);
+  if (maxBreakMinutes > plannedDuration) {
+    await scheduleNotification({
+      title: 'Break limit reached',
+      body: `Break limit reached. Resuming ${activity.title}.`,
+      categoryIdentifier: BREAK_OVER_NOTIFICATION_CATEGORY,
+      data: { activityId, date, uid, breakLogId, phase: 'break-cap' },
+      date: new Date(startedAt.getTime() + maxBreakMinutes * 60_000),
+    }).catch(() => undefined);
+  }
 }
 
 async function finishBreak(uid: string, activityId: string, date: string, breakLogId: string, exceededCap: boolean) {
