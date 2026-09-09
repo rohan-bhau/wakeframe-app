@@ -7,6 +7,7 @@ import {
   DEFAULT_ACTION_IDENTIFIER,
   getLastNotificationResponse,
 } from 'expo-notifications/build/NotificationsEmitter';
+import { dismissNotificationAsync } from 'expo-notifications/build/dismissNotificationAsync';
 import type { NotificationResponse } from 'expo-notifications/build/Notifications.types';
 import { onAuthStateChanged, signOut } from 'firebase/auth';
 import { useEffect, useState } from 'react';
@@ -63,6 +64,8 @@ export default function App() {
     if (!uid) return;
 
     const processResponse = (response: NotificationResponse) => {
+      void dismissNotificationAsync(response.notification.request.identifier).catch(() => undefined);
+
       if (response.actionIdentifier === DEFAULT_ACTION_IDENTIFIER) {
         showNotificationActions(uid, response);
         return;
