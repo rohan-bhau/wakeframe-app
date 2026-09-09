@@ -104,7 +104,7 @@ export async function scheduleTodayActivityNotifications(uid: string, activities
         title: 'Time to start',
         body: activity.title,
         categoryIdentifier: ACTIVITY_NOTIFICATION_CATEGORY,
-        data: { activityId: activity.id, date: getDateKey(now), uid, phase: 'start' },
+        data: { activityId: activity.id, date: getDateKey(now), uid, phase: 'start', maxBreakMinutes: String(activity.maxBreakMinutes ?? 0) },
         date: startDate,
       });
     }
@@ -115,21 +115,21 @@ export async function scheduleTodayActivityNotifications(uid: string, activities
         title: `Check in: ${activity.title}`,
         body: `Did you finish ${activity.title}? Ready for next?`,
         categoryIdentifier: CHECK_IN_NOTIFICATION_CATEGORY,
-        data: { activityId: activity.id, date: getDateKey(now), uid, phase: 'check-in' },
+        data: { activityId: activity.id, date: getDateKey(now), uid, phase: 'check-in', maxBreakMinutes: String(activity.maxBreakMinutes ?? 0) },
         date: endDate,
       });
     }
   }
 }
 
-export async function handleNotificationResponse(uid: string, response: NotificationResponse) {
+export async function handleNotificationResponse(uid: string, response: NotificationResponse, customBreakDurationMinutes?: number) {
   if (Platform.OS === 'web' || response.actionIdentifier === DEFAULT_ACTION_IDENTIFIER) return;
 
   const data = getResponseData(response) as { activityId?: unknown; date?: unknown; breakLogId?: unknown };
   if (typeof data.activityId !== 'string' || typeof data.date !== 'string') return;
 
   if (response.actionIdentifier === ACTIVITY_ACTIONS.break) {
-    await startBreak(uid, data.activityId, data.date);
+    await startBreak(uid, data.activityId, data.date, customBreakDurationMinutes);
     return;
   }
   if (response.actionIdentifier === ACTIVITY_ACTIONS.resume && typeof data.breakLogId === 'string') {
