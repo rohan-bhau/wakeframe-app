@@ -124,28 +124,29 @@ export default function App() {
           </Tab.Screen>
         </Tab.Navigator>
       </NavigationContainer>
-      <BreakDurationModal
-        duration={breakDuration}
-        onChangeDuration={setBreakDuration}
-        onClose={() => setBreakResponse(null)}
-        onConfirm={() => {
-          if (!breakResponse) return;
-          const requestedDuration = Number(breakDuration);
-          if (!Number.isFinite(requestedDuration) || requestedDuration <= 0) {
-            Alert.alert('Invalid duration', 'Enter a break duration greater than zero.');
-            return;
-          }
+      {breakResponse ? (
+        <BreakDurationModal
+          duration={breakDuration}
+          onChangeDuration={setBreakDuration}
+          onClose={() => setBreakResponse(null)}
+          onConfirm={() => {
+            const requestedDuration = Number(breakDuration);
+            if (!Number.isFinite(requestedDuration) || requestedDuration <= 0) {
+              Alert.alert('Invalid duration', 'Enter a break duration greater than zero.');
+              return;
+            }
 
-          const maxBreakMinutes = Number((breakResponse.notification.request.content.data as { maxBreakMinutes?: string } | undefined)?.maxBreakMinutes);
-          const actualDuration = maxBreakMinutes > 0 ? Math.min(requestedDuration, maxBreakMinutes) : requestedDuration;
-          const responseToHandle = breakResponse;
-          setBreakResponse(null);
-          void handleNotificationResponse(uid, responseToHandle, actualDuration)
-            .catch(() => Alert.alert('Could not start break', 'Please try again.'));
-        }}
-        requestedDuration={Number(breakDuration)}
-        maxBreakMinutes={Number((breakResponse?.notification.request.content.data as { maxBreakMinutes?: string } | undefined)?.maxBreakMinutes)}
-      />
+            const maxBreakMinutes = Number((breakResponse.notification.request.content.data as { maxBreakMinutes?: string } | undefined)?.maxBreakMinutes);
+            const actualDuration = maxBreakMinutes > 0 ? Math.min(requestedDuration, maxBreakMinutes) : requestedDuration;
+            const responseToHandle = breakResponse;
+            setBreakResponse(null);
+            void handleNotificationResponse(uid, responseToHandle, actualDuration)
+              .catch(() => Alert.alert('Could not start break', 'Please try again.'));
+          }}
+          requestedDuration={Number(breakDuration)}
+          maxBreakMinutes={Number((breakResponse.notification.request.content.data as { maxBreakMinutes?: string } | undefined)?.maxBreakMinutes)}
+        />
+      ) : null}
     </>
   );
 }
