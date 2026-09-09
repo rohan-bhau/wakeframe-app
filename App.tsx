@@ -50,7 +50,7 @@ export default function App() {
 
     void requestNotificationPermissions().then((granted) => {
       if (granted) void configureActivityNotifications();
-    });
+    }).catch(() => undefined);
   }, [uid]);
 
   useEffect(() => {

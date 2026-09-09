@@ -49,7 +49,7 @@ export function RoutineBuilderScreen({ uid }: { uid: string }) {
       (snapshot) => {
         const nextActivities = snapshot.docs.map((document) => ({ id: document.id, ...document.data() } as Activity));
         setActivities(nextActivities);
-        void scheduleTodayActivityNotifications(uid, nextActivities);
+        void scheduleTodayActivityNotifications(uid, nextActivities).catch(() => undefined);
         setLoading(false);
         setError(null);
       },

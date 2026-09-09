@@ -8,6 +8,7 @@ import { cancelAllScheduledNotificationsAsync } from 'expo-notifications/build/c
 import { scheduleNotificationAsync } from 'expo-notifications/build/scheduleNotificationAsync';
 import { setNotificationCategoryAsync } from 'expo-notifications/build/setNotificationCategoryAsync';
 import { setNotificationChannelAsync } from 'expo-notifications/build/setNotificationChannelAsync';
+import { isRunningInExpoGo } from 'expo';
 import * as TaskManager from 'expo-task-manager';
 import { collection, doc, getDoc, setDoc } from 'firebase/firestore';
 import { Platform } from 'react-native';
@@ -59,7 +60,7 @@ export async function requestNotificationPermissions() {
 export async function configureActivityNotifications() {
   if (Platform.OS === 'web') return;
 
-  if (Platform.OS === 'android') {
+  if (Platform.OS === 'android' && !isRunningInExpoGo()) {
     await setNotificationChannelAsync('activity-reminders', {
       name: 'Activity reminders',
       importance: AndroidImportance.HIGH,
