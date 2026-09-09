@@ -14,6 +14,7 @@ import {
 } from 'react-native';
 
 import { db } from '../config/firebase';
+import { scheduleTodayActivityNotifications } from '../services/notifications';
 import { colors } from '../theme';
 import type { Activity } from '../types';
 
@@ -46,7 +47,9 @@ export function RoutineBuilderScreen({ uid }: { uid: string }) {
     return onSnapshot(
       activitiesQuery,
       (snapshot) => {
-        setActivities(snapshot.docs.map((document) => ({ id: document.id, ...document.data() } as Activity)));
+        const nextActivities = snapshot.docs.map((document) => ({ id: document.id, ...document.data() } as Activity));
+        setActivities(nextActivities);
+        void scheduleTodayActivityNotifications(uid, nextActivities).catch(() => undefined);
         setLoading(false);
         setError(null);
       },
