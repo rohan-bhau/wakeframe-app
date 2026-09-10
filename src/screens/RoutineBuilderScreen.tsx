@@ -19,16 +19,17 @@ import { scheduleTodayActivityNotifications } from '../services/notifications';
 import { colors } from '../theme';
 import type { Activity } from '../types';
 
-type ActivityInput = Pick<Activity, 'title' | 'startTime' | 'duration' | 'category'>;
+type ActivityInput = Pick<Activity, 'title' | 'startTime' | 'category'> & { endTime: string };
 type ActivityDocument = Omit<Activity, 'id'>;
 type AddActivityMode = '24h' | 'custom';
+type TimeField = 'start' | 'end';
 
 const days = ['Mon', 'Tue', 'Wed', 'Thu', 'Fri', 'Sat', 'Sun'] as const;
 
 const emptyForm: ActivityInput = {
   title: '',
   startTime: '',
-  duration: undefined,
+  endTime: '',
   category: '',
 };
 
@@ -43,7 +44,7 @@ export function RoutineBuilderScreen({ uid }: { uid: string }) {
   const [copying, setCopying] = useState(false);
   const [error, setError] = useState<string | null>(null);
   const [pickerDate, setPickerDate] = useState(() => new Date());
-  const [showTimePicker, setShowTimePicker] = useState(false);
+  const [timePickerField, setTimePickerField] = useState<TimeField | null>(null);
 
   useEffect(() => {
     const activitiesQuery = query(collection(db, 'users', uid, 'activities'), orderBy('startTime'));
@@ -72,27 +73,28 @@ export function RoutineBuilderScreen({ uid }: { uid: string }) {
     setSelectedDay(day);
     setForm(emptyForm);
     setCopyDays([]);
-    setShowTimePicker(false);
+    setTimePickerField(null);
   };
 
-  const openTimePicker = () => {
-    const parsedTime = parseTime(form.startTime);
+  const openTimePicker = (field: TimeField) => {
+    const parsedTime = parseTime(field === 'start' ? form.startTime : form.endTime);
     setPickerDate(parsedTime ?? new Date());
-    setShowTimePicker(true);
+    setTimePickerField(field);
   };
 
   const handleTimeChange = (event: DateTimePickerEvent, selectedDate?: Date) => {
     if (event.type === 'dismissed') {
-      setShowTimePicker(false);
+      setTimePickerField(null);
       return;
     }
 
-    if (selectedDate) {
+    if (selectedDate && timePickerField) {
       setPickerDate(selectedDate);
-      setForm((current) => ({ ...current, startTime: formatTime(selectedDate) }));
+      const time = formatTime(selectedDate);
+      setForm((current) => ({ ...current, [timePickerField === 'start' ? 'startTime' : 'endTime']: time }));
     }
 
-    if (Platform.OS === 'android') setShowTimePicker(false);
+    if (Platform.OS === 'android') setTimePickerField(null);
   };
 
   const toggleCopyDay = (day: number) => {
@@ -150,12 +152,14 @@ export function RoutineBuilderScreen({ uid }: { uid: string }) {
   const saveActivity = async () => {
     const title = form.title.trim();
     const category = form.category.trim();
-    const duration = Number(form.duration);
+    const startTime = parseTime(form.startTime);
+    const endTime = parseTime(form.endTime);
 
-    if (!title || !category || !/^([01]\d|2[0-3]):[0-5]\d$/.test(form.startTime) || !Number.isFinite(duration) || duration <= 0) {
-      Alert.alert('Check the form', 'Enter a title, category, a time in HH:MM format, and a positive duration.');
+    if (!title || !category || !startTime || !endTime || endTime <= startTime) {
+      Alert.alert('Check the form', 'Enter a title, category, and an end time after the start time.');
       return;
     }
+    const duration = timeToMinutes(endTime) - timeToMinutes(startTime);
 
     setSaving(true);
     try {
@@ -228,12 +232,12 @@ export function RoutineBuilderScreen({ uid }: { uid: string }) {
                     <Pressable
                       accessibilityLabel="Activity start time"
                       accessibilityRole="button"
-                      onPress={openTimePicker}
+                      onPress={() => openTimePicker('start')}
                       style={styles.input}
                     >
                       <Text style={form.startTime ? styles.inputText : styles.placeholder}>{form.startTime || '09:00'}</Text>
                     </Pressable>
-                    {showTimePicker ? (
+                    {timePickerField === 'start' ? (
                       <View style={styles.pickerContainer}>
                         <DateTimePicker
                           display={Platform.OS === 'ios' ? 'spinner' : 'clock'}
@@ -242,7 +246,7 @@ export function RoutineBuilderScreen({ uid }: { uid: string }) {
                           value={pickerDate}
                         />
                         {Platform.OS === 'ios' ? (
-                          <Pressable accessibilityRole="button" onPress={() => setShowTimePicker(false)} style={styles.doneButton}>
+                          <Pressable accessibilityRole="button" onPress={() => setTimePickerField(null)} style={styles.doneButton}>
                             <Text style={styles.doneButtonText}>Done</Text>
                           </Pressable>
                         ) : null}
@@ -251,16 +255,30 @@ export function RoutineBuilderScreen({ uid }: { uid: string }) {
                   </Field>
                 </View>
                 <View style={styles.half}>
-                  <Field label="Duration (minutes)">
-                    <TextInput
-                      accessibilityLabel="Activity duration"
-                      keyboardType="number-pad"
-                      onChangeText={(value) => setForm((current) => ({ ...current, duration: value ? Number(value) : undefined }))}
-                      placeholder="60"
-                      placeholderTextColor={colors.outline}
+                  <Field label="End time">
+                    <Pressable
+                      accessibilityLabel="Activity end time"
+                      accessibilityRole="button"
+                      onPress={() => openTimePicker('end')}
                       style={styles.input}
-                      value={form.duration === undefined ? '' : String(form.duration)}
-                    />
+                    >
+                      <Text style={form.endTime ? styles.inputText : styles.placeholder}>{form.endTime || '10:00'}</Text>
+                    </Pressable>
+                    {timePickerField === 'end' ? (
+                      <View style={styles.pickerContainer}>
+                        <DateTimePicker
+                          display={Platform.OS === 'ios' ? 'spinner' : 'clock'}
+                          mode="time"
+                          onChange={handleTimeChange}
+                          value={pickerDate}
+                        />
+                        {Platform.OS === 'ios' ? (
+                          <Pressable accessibilityRole="button" onPress={() => setTimePickerField(null)} style={styles.doneButton}>
+                            <Text style={styles.doneButtonText}>Done</Text>
+                          </Pressable>
+                        ) : null}
+                      </View>
+                    ) : null}
                   </Field>
                 </View>
               </View>
@@ -379,7 +397,7 @@ function ModeOption({
 }
 
 function parseTime(value: string) {
-  const match = /^(\d{2}):(\d{2})$/.exec(value);
+  const match = /^([01]\d|2[0-3]):([0-5]\d)$/.exec(value);
   if (!match) return null;
 
   const date = new Date();
@@ -389,6 +407,10 @@ function parseTime(value: string) {
 
 function formatTime(date: Date) {
   return `${String(date.getHours()).padStart(2, '0')}:${String(date.getMinutes()).padStart(2, '0')}`;
+}
+
+function timeToMinutes(date: Date) {
+  return date.getHours() * 60 + date.getMinutes();
 }
 
 const styles = StyleSheet.create({
