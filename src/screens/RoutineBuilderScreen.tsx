@@ -1,4 +1,5 @@
 import { addDoc, collection, doc, onSnapshot, orderBy, query, writeBatch } from 'firebase/firestore';
+import DateTimePicker, { type DateTimePickerEvent } from '@react-native-community/datetimepicker';
 import { useEffect, useState, type ReactNode } from 'react';
 import {
   ActivityIndicator,
@@ -41,6 +42,8 @@ export function RoutineBuilderScreen({ uid }: { uid: string }) {
   const [saving, setSaving] = useState(false);
   const [copying, setCopying] = useState(false);
   const [error, setError] = useState<string | null>(null);
+  const [pickerDate, setPickerDate] = useState(() => new Date());
+  const [showTimePicker, setShowTimePicker] = useState(false);
 
   useEffect(() => {
     const activitiesQuery = query(collection(db, 'users', uid, 'activities'), orderBy('startTime'));
@@ -69,6 +72,27 @@ export function RoutineBuilderScreen({ uid }: { uid: string }) {
     setSelectedDay(day);
     setForm(emptyForm);
     setCopyDays([]);
+    setShowTimePicker(false);
+  };
+
+  const openTimePicker = () => {
+    const parsedTime = parseTime(form.startTime);
+    setPickerDate(parsedTime ?? new Date());
+    setShowTimePicker(true);
+  };
+
+  const handleTimeChange = (event: DateTimePickerEvent, selectedDate?: Date) => {
+    if (event.type === 'dismissed') {
+      setShowTimePicker(false);
+      return;
+    }
+
+    if (selectedDate) {
+      setPickerDate(selectedDate);
+      setForm((current) => ({ ...current, startTime: formatTime(selectedDate) }));
+    }
+
+    if (Platform.OS === 'android') setShowTimePicker(false);
   };
 
   const toggleCopyDay = (day: number) => {
@@ -201,16 +225,29 @@ export function RoutineBuilderScreen({ uid }: { uid: string }) {
               <View style={styles.row}>
                 <View style={styles.half}>
                   <Field label="Start time">
-                    <TextInput
+                    <Pressable
                       accessibilityLabel="Activity start time"
-                      keyboardType="numbers-and-punctuation"
-                      maxLength={5}
-                      onChangeText={(startTime) => setForm((current) => ({ ...current, startTime }))}
-                      placeholder="09:00"
-                      placeholderTextColor={colors.outline}
+                      accessibilityRole="button"
+                      onPress={openTimePicker}
                       style={styles.input}
-                      value={form.startTime}
-                    />
+                    >
+                      <Text style={form.startTime ? styles.inputText : styles.placeholder}>{form.startTime || '09:00'}</Text>
+                    </Pressable>
+                    {showTimePicker ? (
+                      <View style={styles.pickerContainer}>
+                        <DateTimePicker
+                          display={Platform.OS === 'ios' ? 'spinner' : 'clock'}
+                          mode="time"
+                          onChange={handleTimeChange}
+                          value={pickerDate}
+                        />
+                        {Platform.OS === 'ios' ? (
+                          <Pressable accessibilityRole="button" onPress={() => setShowTimePicker(false)} style={styles.doneButton}>
+                            <Text style={styles.doneButtonText}>Done</Text>
+                          </Pressable>
+                        ) : null}
+                      </View>
+                    ) : null}
                   </Field>
                 </View>
                 <View style={styles.half}>
@@ -341,6 +378,19 @@ function ModeOption({
   );
 }
 
+function parseTime(value: string) {
+  const match = /^(\d{2}):(\d{2})$/.exec(value);
+  if (!match) return null;
+
+  const date = new Date();
+  date.setHours(Number(match[1]), Number(match[2]), 0, 0);
+  return date;
+}
+
+function formatTime(date: Date) {
+  return `${String(date.getHours()).padStart(2, '0')}:${String(date.getMinutes()).padStart(2, '0')}`;
+}
+
 const styles = StyleSheet.create({
   screen: { flex: 1, backgroundColor: colors.background },
   content: { padding: 20, paddingTop: 32, paddingBottom: 40 },
@@ -382,6 +432,11 @@ const styles = StyleSheet.create({
   input: { borderBottomColor: colors.outlineVariant, borderBottomWidth: 1, color: colors.onSurface, fontSize: 16, minHeight: 44, paddingVertical: 8 },
   row: { flexDirection: 'row', gap: 12 },
   half: { flex: 1 },
+  inputText: { color: colors.onSurface, fontSize: 16, paddingVertical: 8 },
+  placeholder: { color: colors.outline, fontSize: 16, paddingVertical: 8 },
+  pickerContainer: { backgroundColor: colors.surfaceContainerHigh, marginTop: 8, padding: 8 },
+  doneButton: { alignItems: 'center', borderColor: colors.outlineVariant, borderWidth: 1, marginTop: 4, minHeight: 40, justifyContent: 'center' },
+  doneButtonText: { color: colors.tertiary, fontSize: 14, fontWeight: '600' },
   button: { alignItems: 'center', backgroundColor: colors.tertiary, justifyContent: 'center', minHeight: 48, marginTop: 4 },
   buttonText: { color: colors.background, fontSize: 15, fontWeight: '600' },
   listHeader: { alignItems: 'center', flexDirection: 'row', marginBottom: 12, marginTop: 28 },
