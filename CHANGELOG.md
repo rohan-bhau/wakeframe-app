@@ -1,5 +1,16 @@
 # Changelog
 
+## [1.0.1.1] - 2026-09-10
+
+### Added
+
+- Choose activity start and end times with native clock or wheel pickers.
+
+### Changed
+
+- Activity duration is now calculated from the selected start and end times.
+- End times must be after their activity's start time.
+
 ## [1.0.1.0] - 2026-09-09
 
 ### Added
