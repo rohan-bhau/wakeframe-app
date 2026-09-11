@@ -130,7 +130,9 @@ export default function App() {
           <Tab.Screen name="Routine Builder">
             {() => <RoutineBuilderScreen uid={uid} />}
           </Tab.Screen>
-          <Tab.Screen name="Analytics" component={AnalyticsScreen} />
+          <Tab.Screen name="Analytics">
+            {() => <AnalyticsScreen uid={uid} />}
+          </Tab.Screen>
           <Tab.Screen name="Settings">
             {() => <SettingsScreen onLogout={() => signOut(auth)} />}
           </Tab.Screen>
