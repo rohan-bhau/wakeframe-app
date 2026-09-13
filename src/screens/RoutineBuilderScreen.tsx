@@ -1,6 +1,6 @@
-import { addDoc, collection, doc, onSnapshot, orderBy, query, writeBatch } from 'firebase/firestore';
+import { addDoc, collection, deleteDoc, doc, onSnapshot, orderBy, query, updateDoc, writeBatch } from 'firebase/firestore';
 import DateTimePicker, { type DateTimePickerEvent } from '@react-native-community/datetimepicker';
-import { useEffect, useState, type ReactNode } from 'react';
+import { useEffect, useRef, useState, type ReactNode } from 'react';
 import {
   ActivityIndicator,
   Alert,
@@ -42,9 +42,11 @@ export function RoutineBuilderScreen({ uid }: { uid: string }) {
   const [loading, setLoading] = useState(true);
   const [saving, setSaving] = useState(false);
   const [copying, setCopying] = useState(false);
+  const [editingActivityId, setEditingActivityId] = useState<string | null>(null);
   const [error, setError] = useState<string | null>(null);
   const [pickerDate, setPickerDate] = useState(() => new Date());
   const [timePickerField, setTimePickerField] = useState<TimeField | null>(null);
+  const scrollViewRef = useRef<ScrollView>(null);
 
   useEffect(() => {
     const activitiesQuery = query(collection(db, 'users', uid, 'activities'), orderBy('startTime'));
@@ -73,6 +75,29 @@ export function RoutineBuilderScreen({ uid }: { uid: string }) {
     setSelectedDay(day);
     setForm(emptyForm);
     setCopyDays([]);
+    setTimePickerField(null);
+    setEditingActivityId(null);
+  };
+
+  const editActivity = (activity: Activity) => {
+    const startTime = parseTime(activity.startTime);
+    const endTime = activity.endTime ?? (startTime && activity.duration ? formatTime(new Date(startTime.getTime() + activity.duration * 60_000)) : '');
+
+    setEditingActivityId(activity.id);
+    setMode('24h');
+    setForm({
+      title: activity.title,
+      startTime: activity.startTime,
+      endTime,
+      category: activity.category,
+    });
+    setTimePickerField(null);
+    scrollViewRef.current?.scrollTo({ animated: true, y: 0 });
+  };
+
+  const cancelEditing = () => {
+    setEditingActivityId(null);
+    setForm(emptyForm);
     setTimePickerField(null);
   };
 
@@ -167,24 +192,55 @@ export function RoutineBuilderScreen({ uid }: { uid: string }) {
         weekday: selectedDay,
         title,
         startTime: form.startTime,
+        endTime: form.endTime,
         duration,
         category,
         maxBreakMinutes: 0,
         isExtended: false,
         sortOrder: selectedActivities.length,
       };
-      await addDoc(collection(db, 'users', uid, 'activities'), activity);
-      setForm(emptyForm);
+      if (editingActivityId) {
+        await updateDoc(doc(db, 'users', uid, 'activities', editingActivityId), activity);
+        cancelEditing();
+      } else {
+        await addDoc(collection(db, 'users', uid, 'activities'), activity);
+        setForm(emptyForm);
+      }
     } catch {
-      Alert.alert('Could not save activity', 'Please check your connection and try again.');
+      Alert.alert(editingActivityId ? 'Could not update activity' : 'Could not save activity', 'Please check your connection and try again.');
     } finally {
       setSaving(false);
     }
   };
 
+  const deleteActivity = () => {
+    if (!editingActivityId) return;
+
+    Alert.alert('Delete this activity?', 'This cannot be undone.', [
+      { text: 'Cancel', style: 'cancel' },
+      {
+        text: 'Delete',
+        style: 'destructive',
+        onPress: () => {
+          void (async () => {
+            setSaving(true);
+            try {
+              await deleteDoc(doc(db, 'users', uid, 'activities', editingActivityId));
+              cancelEditing();
+            } catch {
+              Alert.alert('Could not delete activity', 'Please check your connection and try again.');
+            } finally {
+              setSaving(false);
+            }
+          })();
+        },
+      },
+    ]);
+  };
+
   return (
     <KeyboardAvoidingView behavior={Platform.OS === 'ios' ? 'padding' : undefined} style={styles.screen}>
-      <ScrollView contentContainerStyle={styles.content} keyboardShouldPersistTaps="handled">
+      <ScrollView ref={scrollViewRef} contentContainerStyle={styles.content} keyboardShouldPersistTaps="handled">
         <Text style={styles.eyebrow}>Wakeframe</Text>
         <Text style={styles.title}>Routine Builder</Text>
         <Text style={styles.description}>Build each day of your week, then keep your routine synced.</Text>
@@ -206,7 +262,7 @@ export function RoutineBuilderScreen({ uid }: { uid: string }) {
         <Text style={styles.selectedDayLabel}>{days[selectedDay]} activities</Text>
 
         <View style={styles.form}>
-          <Text style={styles.formTitle}>Add activity</Text>
+          <Text style={styles.formTitle}>{editingActivityId ? 'Edit activity' : 'Add activity'}</Text>
           <View accessibilityRole="radiogroup" style={styles.modeToggle}>
             <ModeOption label="24-Hour Mode" mode="24h" selectedMode={mode} onPress={setMode} />
             <ModeOption label="Custom Mode" mode="custom" selectedMode={mode} onPress={setMode} />
@@ -293,8 +349,18 @@ export function RoutineBuilderScreen({ uid }: { uid: string }) {
                 />
               </Field>
               <Pressable accessibilityRole="button" disabled={saving} onPress={saveActivity} style={styles.button}>
-                {saving ? <ActivityIndicator color={colors.background} /> : <Text style={styles.buttonText}>Save activity</Text>}
+                {saving ? <ActivityIndicator color={colors.background} /> : <Text style={styles.buttonText}>{editingActivityId ? 'Save changes' : 'Save activity'}</Text>}
               </Pressable>
+              {editingActivityId ? (
+                <>
+                  <Pressable accessibilityRole="button" disabled={saving} onPress={deleteActivity} style={styles.deleteButton}>
+                    <Text style={styles.deleteButtonText}>Delete activity</Text>
+                  </Pressable>
+                  <Pressable accessibilityRole="button" disabled={saving} onPress={cancelEditing} style={styles.cancelButton}>
+                    <Text style={styles.cancelButtonText}>Cancel</Text>
+                  </Pressable>
+                </>
+              ) : null}
             </>
           )}
         </View>
@@ -307,7 +373,13 @@ export function RoutineBuilderScreen({ uid }: { uid: string }) {
         {error ? <Text style={styles.error}>{error}</Text> : null}
         {!loading && !error && selectedActivities.length === 0 ? <Text style={styles.empty}>No activities saved for {days[selectedDay]} yet.</Text> : null}
         {selectedActivities.map((activity) => (
-          <View key={activity.id} style={styles.activity}>
+          <Pressable
+            accessibilityLabel={`Edit ${activity.title}`}
+            accessibilityRole="button"
+            key={activity.id}
+            onPress={() => editActivity(activity)}
+            style={styles.activity}
+          >
             <View style={styles.activityTime}>
               <Text style={styles.time}>{activity.startTime}</Text>
               <Text style={styles.minutes}>{activity.duration} min</Text>
@@ -316,7 +388,7 @@ export function RoutineBuilderScreen({ uid }: { uid: string }) {
               <Text style={styles.activityTitle}>{activity.title}</Text>
               <Text style={styles.category}>{activity.category}</Text>
             </View>
-          </View>
+          </Pressable>
         ))}
         {!loading && !error && selectedActivities.length > 0 ? (
           <View style={styles.copyPanel}>
@@ -461,6 +533,10 @@ const styles = StyleSheet.create({
   doneButtonText: { color: colors.tertiary, fontSize: 14, fontWeight: '600' },
   button: { alignItems: 'center', backgroundColor: colors.tertiary, justifyContent: 'center', minHeight: 48, marginTop: 4 },
   buttonText: { color: colors.background, fontSize: 15, fontWeight: '600' },
+  deleteButton: { alignItems: 'center', borderColor: colors.missedRose, borderWidth: 1, justifyContent: 'center', minHeight: 46, marginTop: 10 },
+  deleteButtonText: { color: colors.missedRose, fontSize: 15, fontWeight: '600' },
+  cancelButton: { alignItems: 'center', justifyContent: 'center', minHeight: 42, marginTop: 4 },
+  cancelButtonText: { color: colors.onSurfaceVariant, fontSize: 14, fontWeight: '600' },
   listHeader: { alignItems: 'center', flexDirection: 'row', marginBottom: 12, marginTop: 28 },
   sectionTitle: { color: colors.onSurface, flex: 1, fontSize: 20, fontWeight: '500' },
   count: { color: colors.tertiary, fontSize: 14 },
