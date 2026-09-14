@@ -1,5 +1,16 @@
 # Changelog
 
+## [1.0.2.0] - 2026-09-14
+
+### Added
+
+- Review daily activity timelines with completed, ignored, missed, and break states.
+- Compare planned and actual time with period summaries, status graphs, filters, and pagination.
+
+### Changed
+
+- Analytics Day, Week, and Month views now load and aggregate their selected period.
+
 ## [1.0.1.1] - 2026-09-10
 
 ### Added

@@ -1,6 +1,7 @@
 export const colors = {
   background: '#0f1320',
   surfaceContainer: '#1c1f2c',
+  surfaceContainerLow: '#181b28',
   surfaceContainerHigh: '#262937',
   onSurface: '#dfe1f4',
   onSurfaceVariant: '#c8c5cc',
@@ -9,4 +10,6 @@ export const colors = {
   tertiary: '#ffb956',
   progressTeal: '#4A9B8E',
   missedRose: '#C4677A',
+  ignored: '#8E7180',
+  break: '#8B7352',
 };
