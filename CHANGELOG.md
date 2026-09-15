@@ -1,5 +1,12 @@
 # Changelog
 
+## [1.0.2.1] - 2026-09-15
+
+### Added
+
+- Edit existing routine activities from the saved activities list.
+- Delete activities with a confirmation prompt to prevent accidental loss.
+
 ## [1.0.2.0] - 2026-09-14
 
 ### Added
